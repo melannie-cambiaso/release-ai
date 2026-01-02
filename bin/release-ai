@@ -128,47 +128,138 @@ cmd_init() {
         read -p "¿Deseas sobrescribirlo? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Operación cancelada"
-            return 0
+            log_info "Configuración de proyecto no modificada"
+        else
+            # Copy example config
+            if [[ -f "${SCRIPT_DIR}/../.release-ai.config.example.json" ]]; then
+                cp "${SCRIPT_DIR}/../.release-ai.config.example.json" ".release-ai.config.json"
+                log_success "Archivo .release-ai.config.json actualizado"
+            else
+                log_error "No se encontró el archivo de configuración de ejemplo"
+                return 1
+            fi
         fi
-    fi
-
-    # Copy example config
-    if [[ -f "${SCRIPT_DIR}/../.release-ai.config.example.json" ]]; then
-        cp "${SCRIPT_DIR}/../.release-ai.config.example.json" ".release-ai.config.json"
-        log_success "Archivo .release-ai.config.json creado"
     else
-        log_error "No se encontró el archivo de configuración de ejemplo"
-        return 1
+        # Copy example config
+        if [[ -f "${SCRIPT_DIR}/../.release-ai.config.example.json" ]]; then
+            cp "${SCRIPT_DIR}/../.release-ai.config.example.json" ".release-ai.config.json"
+            log_success "Archivo .release-ai.config.json creado"
+        else
+            log_error "No se encontró el archivo de configuración de ejemplo"
+            return 1
+        fi
     fi
 
     # Create global config directory if it doesn't exist
     mkdir -p "$HOME/.config/release-ai"
 
-    # Check if global config exists
-    if [[ ! -f "$HOME/.config/release-ai/config.json" ]]; then
-        log_info "Creando configuración global"
+    # Check if API key is already configured
+    local current_api_key
+    current_api_key=$(get_config "anthropic_api_key" "")
 
-        # Ask for API key
-        read -p "¿Deseas configurar tu API key de Claude ahora? (y/N): " -n 1 -r
+    if [[ -n "$current_api_key" ]]; then
+        log_info "API key de Claude ya está configurada"
+        echo ""
+        read -p "¿Deseas actualizarla? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "API key no modificada"
+        else
+            echo ""
+            log_info "Ingresa tu nueva API key de Anthropic"
+            log_info "Formato: sk-ant-api03-..."
+            echo ""
+            read -p "API Key: " -r api_key
+
+            if [[ -z "$api_key" ]]; then
+                log_warn "API key vacía, operación cancelada"
+            elif [[ ! "$api_key" =~ ^sk-ant- ]]; then
+                log_warn "API key no parece válida (debe comenzar con 'sk-ant-')"
+                read -p "¿Guardar de todas formas? (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    echo "{\"anthropic_api_key\": \"$api_key\"}" > "$HOME/.config/release-ai/config.json"
+                    chmod 600 "$HOME/.config/release-ai/config.json"
+                    log_success "API key guardada en ~/.config/release-ai/config.json"
+                fi
+            else
+                echo "{\"anthropic_api_key\": \"$api_key\"}" > "$HOME/.config/release-ai/config.json"
+                chmod 600 "$HOME/.config/release-ai/config.json"
+                log_success "API key actualizada en ~/.config/release-ai/config.json"
+            fi
+        fi
+    else
+        # No API key configured, ask to set one
+        log_info "No se encontró API key de Claude configurada"
+        echo ""
+        read -p "¿Deseas configurar tu API key ahora? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            read -p "Ingresa tu API key de Anthropic: " -r api_key
-            echo "{\"anthropic_api_key\": \"$api_key\"}" > "$HOME/.config/release-ai/config.json"
-            chmod 600 "$HOME/.config/release-ai/config.json"
-            log_success "API key guardada en ~/.config/release-ai/config.json"
+            echo ""
+            log_info "Ingresa tu API key de Anthropic"
+            log_info "Puedes obtenerla en: https://console.anthropic.com/settings/keys"
+            log_info "Formato: sk-ant-api03-..."
+            echo ""
+            read -p "API Key: " -r api_key
+
+            if [[ -z "$api_key" ]]; then
+                log_warn "API key vacía, no se guardó"
+                echo "{}" > "$HOME/.config/release-ai/config.json"
+                chmod 600 "$HOME/.config/release-ai/config.json"
+            elif [[ ! "$api_key" =~ ^sk-ant- ]]; then
+                log_warn "API key no parece válida (debe comenzar con 'sk-ant-')"
+                read -p "¿Guardar de todas formas? (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    echo "{\"anthropic_api_key\": \"$api_key\"}" > "$HOME/.config/release-ai/config.json"
+                    chmod 600 "$HOME/.config/release-ai/config.json"
+                    log_success "API key guardada en ~/.config/release-ai/config.json"
+                else
+                    echo "{}" > "$HOME/.config/release-ai/config.json"
+                    chmod 600 "$HOME/.config/release-ai/config.json"
+                fi
+            else
+                echo "{\"anthropic_api_key\": \"$api_key\"}" > "$HOME/.config/release-ai/config.json"
+                chmod 600 "$HOME/.config/release-ai/config.json"
+                log_success "API key guardada en ~/.config/release-ai/config.json"
+            fi
         else
-            echo "{}" > "$HOME/.config/release-ai/config.json"
-            log_info "Puedes agregar tu API key más tarde editando ~/.config/release-ai/config.json"
+            # Create empty config if it doesn't exist
+            if [[ ! -f "$HOME/.config/release-ai/config.json" ]]; then
+                echo "{}" > "$HOME/.config/release-ai/config.json"
+                chmod 600 "$HOME/.config/release-ai/config.json"
+            fi
+            log_info "Puedes agregar tu API key más tarde con: release-ai init"
+            log_info "O editando manualmente: ~/.config/release-ai/config.json"
         fi
     fi
 
+    echo ""
     log_success "release-ai inicializado correctamente"
+    echo ""
+
+    # Show current configuration status
+    log_info "Estado de configuración:"
+    echo ""
+
+    if claude_is_configured 2>/dev/null; then
+        echo "  ✓ Claude AI: Configurado"
+    else
+        echo "  ✗ Claude AI: No configurado"
+    fi
+
+    if [[ -f ".release-ai.config.json" ]]; then
+        echo "  ✓ Configuración de proyecto: .release-ai.config.json"
+    fi
+
     echo ""
     log_info "Próximos pasos:"
     echo "  1. Edita .release-ai.config.json con la configuración de tu proyecto"
-    echo "  2. Ejecuta 'release-ai start <version>' para crear un nuevo release"
-    echo "  3. Usa 'release-ai suggest' para que Claude sugiera la próxima versión"
+    echo "  2. Ejecuta 'release-ai config' para ver la configuración actual"
+    echo "  3. Ejecuta 'release-ai start <version>' para crear un nuevo release"
+    if claude_is_configured 2>/dev/null; then
+        echo "  4. Usa 'release-ai suggest' para que Claude sugiera la próxima versión"
+    fi
 }
 
 # cmd_config: Show current configuration

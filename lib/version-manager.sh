@@ -126,7 +126,7 @@ get_commits_since_last_tag() {
         git log --no-merges --pretty=format:'%H|%s|%b'
     else
         # Get commits since last tag
-        git log "${last_tag}..HEAD" --no-merges --pretty=format:'%H|%s|%b'
+        git log --no-merges --pretty=format:'%H|%s|%b' "${last_tag}..HEAD"
     fi
 }
 
