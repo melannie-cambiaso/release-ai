@@ -533,25 +533,15 @@ cmd_merge() {
     log_step "9" "Enviando branch de release con merge al remoto"
     pause_for_keypass "A punto de enviar el branch de release con merge"
 
-    if ! git_safe_push; then
-        return 1
-    fi
-
-    # Step 9b: Push develop with cherry-picked commit
-    log_step "9b" "Enviando branch develop con cherry-pick al remoto"
-
-    if ! git_safe_checkout "$DEVELOP_BRANCH"; then
-        return 1
-    fi
-
-    if ! git_safe_push; then
+    # Explicitly push current branch (release branch)
+    if ! git_safe_push origin "$branch_name"; then
         return 1
     fi
 
     save_state "merge_complete" "true"
     save_state "phase" "merge_complete"
 
-    log_success "Preparación de merge completada y enviada al remoto"
+    log_success "Merge completado y branch de release enviado al remoto"
 
     # Output JSON
     cat <<EOF
@@ -606,6 +596,18 @@ cmd_finalize() {
     pause_for_keypass "A punto de enviar tags al remoto"
 
     if ! git_push_tags; then
+        return 1
+    fi
+
+    # Step 12: Push develop with cherry-picked commit
+    log_step "12" "Enviando branch develop con cherry-pick al remoto"
+
+    if ! git_safe_checkout "$DEVELOP_BRANCH"; then
+        return 1
+    fi
+
+    # Explicitly push develop branch
+    if ! git_safe_push origin "$DEVELOP_BRANCH"; then
         return 1
     fi
 
