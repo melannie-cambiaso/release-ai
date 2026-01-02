@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+# claude-integration.sh - Claude AI integration using direct API calls with curl
+# Provides AI-powered features for release automation
+
+# Check if Claude is configured
+claude_is_configured() {
+    local api_key="${ANTHROPIC_API_KEY:-$(get_config "anthropic_api_key")}"
+    [[ -n "$api_key" ]]
+}
+
+# Call Claude API using curl
+# Args: prompt, max_tokens (optional)
+claude_api_call() {
+    local prompt="$1"
+    local max_tokens="${2:-2048}"
+
+    # Get API key from env or config
+    local api_key="${ANTHROPIC_API_KEY:-$(get_config "anthropic_api_key")}"
+
+    if [[ -z "$api_key" ]]; then
+        log_error "API key de Claude no configurada"
+        log_info "Configura ANTHROPIC_API_KEY o ejecuta 'release-ai init'"
+        return 1
+    fi
+
+    # Get model from config
+    local model=$(get_config "claude.model" "claude-sonnet-4-5-20250929")
+
+    # Escape prompt for JSON (replace newlines and quotes)
+    local escaped_prompt=$(echo "$prompt" | jq -Rs .)
+
+    # Make API call
+    local response
+    response=$(curl -s https://api.anthropic.com/v1/messages \
+        -H "content-type: application/json" \
+        -H "x-api-key: $api_key" \
+        -H "anthropic-version: 2023-06-01" \
+        -d "{
+            \"model\": \"$model\",
+            \"max_tokens\": $max_tokens,
+            \"messages\": [{
+                \"role\": \"user\",
+                \"content\": $escaped_prompt
+            }]
+        }")
+
+    # Check for errors
+    if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
+        local error_msg=$(echo "$response" | jq -r '.error.message')
+        log_error "Error de Claude API: $error_msg"
+        return 1
+    fi
+
+    # Extract text from response
+    echo "$response" | jq -r '.content[0].text'
+}
+
+# Suggest next version based on commits
+# Returns: version bump type and suggested version
+claude_suggest_version() {
+    log_info "Analizando commits con Claude AI..."
+
+    # Get commits since last tag
+    local commits
+    commits=$(get_commits_since_last_tag)
+
+    if [[ -z "$commits" ]]; then
+        log_warn "No hay commits desde el último release"
+        return 1
+    fi
+
+    # Get current version
+    local current_version
+    current_version=$(get_current_version "$PACKAGE_JSON")
+
+    if [[ -z "$current_version" ]]; then
+        log_error "No se pudo obtener la versión actual de package.json"
+        return 1
+    fi
+
+    # Build prompt
+    local prompt="Eres un experto en semantic versioning y conventional commits.
+
+Analiza los siguientes commits y determina el tipo de bump de versión necesario (major, minor, o patch).
+
+Versión actual: $current_version
+
+Commits:
+$commits
+
+Instrucciones:
+1. Revisa cada commit siguiendo conventional commits (feat:, fix:, BREAKING CHANGE:, etc.)
+2. Determina si hay breaking changes (! o BREAKING CHANGE:) → major bump
+3. Si hay nuevas features (feat:) → minor bump
+4. Si solo hay fixes (fix:) o otros cambios → patch bump
+5. Responde SOLO en el siguiente formato JSON:
+
+{
+  \"bump_type\": \"major|minor|patch\",
+  \"suggested_version\": \"X.Y.Z\",
+  \"reasoning\": \"Breve explicación de por qué este tipo de bump\",
+  \"highlights\": [\"feature 1\", \"fix 1\", \"breaking change 1\"]
+}
+
+Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones adicionales."
+
+    # Call Claude
+    local response
+    response=$(claude_api_call "$prompt" 500)
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    # Parse and display response
+    echo "$response"
+}
+
+# Generate release notes for a version
+# Args: version, output_file (optional)
+claude_generate_notes() {
+    local version="$1"
+    local output_file="${2:-}"
+
+    log_info "Generando release notes para v${version} con Claude AI..."
+
+    # Get commits since last tag
+    local commits
+    commits=$(get_commits_since_last_tag)
+
+    if [[ -z "$commits" ]]; then
+        log_warn "No hay commits desde el último release"
+        return 1
+    fi
+
+    # Build prompt
+    local prompt="Eres un experto en documentación de releases y comunicación técnica.
+
+Genera release notes profesionales en español para la versión $version basándote en los siguientes commits:
+
+$commits
+
+Instrucciones:
+1. Agrupa los cambios por categorías: Features, Bug Fixes, Breaking Changes, Other Changes
+2. Usa formato markdown limpio y profesional
+3. Cada ítem debe ser claro y conciso
+4. Si hay breaking changes, resáltalos con ⚠️
+5. Usa emojis apropiados: 🚀 features, 🐛 fixes, 💥 breaking, 📝 docs, etc.
+6. Incluye una breve descripción al inicio resumiendo los cambios principales
+
+Formato esperado:
+
+# Release v${version}
+
+[Descripción breve del release]
+
+## 🚀 Features
+- Descripción de feature 1
+- Descripción de feature 2
+
+## 🐛 Bug Fixes
+- Descripción de fix 1
+- Descripción de fix 2
+
+## 💥 Breaking Changes
+⚠️ **IMPORTANTE**: [Descripción de breaking change]
+
+## 📝 Other Changes
+- Otros cambios relevantes
+
+Genera solo el contenido markdown, sin comillas ni delimitadores de código."
+
+    # Call Claude
+    local notes
+    notes=$(claude_api_call "$prompt" 2048)
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    # Save to file if specified
+    if [[ -n "$output_file" ]]; then
+        echo "$notes" > "$output_file"
+        log_success "Release notes guardadas en: $output_file"
+    else
+        echo "$notes"
+    fi
+}
+
+# Validate changes before release
+# Returns: list of warnings/issues or "OK"
+claude_validate_changes() {
+    log_info "Validando cambios con Claude AI..."
+
+    # Get commits since last tag
+    local commits
+    commits=$(get_commits_since_last_tag)
+
+    if [[ -z "$commits" ]]; then
+        log_warn "No hay commits desde el último release"
+        return 0
+    fi
+
+    # Get git diff
+    local diff
+    diff=$(git diff HEAD~10..HEAD 2>/dev/null | head -500)
+
+    # Build prompt
+    local prompt="Eres un experto en quality assurance y release management.
+
+Analiza los siguientes cambios y detecta posibles problemas antes del release:
+
+Commits:
+$commits
+
+Diff (últimas 500 líneas):
+$diff
+
+Revisa:
+1. ¿Hay breaking changes sin documentar con BREAKING CHANGE?
+2. ¿Los commits siguen conventional commits?
+3. ¿Hay cambios en código sin tests asociados? (archivos .test. o .spec.)
+4. ¿Hay TODOs o FIXMEs en el código?
+5. ¿Hay console.log, debugger, o código de depuración?
+6. ¿La versión en package.json es consistente?
+
+Responde en el siguiente formato:
+
+ESTADO: [OK | WARNINGS | ERRORS]
+
+[Si hay warnings o errors, lista cada uno con -]
+
+Ejemplo:
+ESTADO: WARNINGS
+- Breaking change en función X sin documentar con BREAKING CHANGE:
+- Se modificó componente Y sin tests asociados
+- Hay 2 console.log en archivo Z
+
+Si todo está bien, solo responde:
+ESTADO: OK
+✓ Todos los checks pasaron correctamente"
+
+    # Call Claude
+    local validation
+    validation=$(claude_api_call "$prompt" 1024)
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    echo "$validation"
+}
+
+# Interactive conversational assistant for releases
+# Args: message (optional for first prompt)
+claude_assist() {
+    local initial_message="${1:-}"
+
+    log_phase "Asistente Claude para Releases"
+    log_info "Escribe 'exit' o 'quit' para salir"
+    echo ""
+
+    # If no initial message, start conversation
+    if [[ -z "$initial_message" ]]; then
+        echo "¿En qué puedo ayudarte con tu release?"
+        echo ""
+    fi
+
+    # Conversation loop
+    while true; do
+        # Read user input
+        if [[ -n "$initial_message" ]]; then
+            local user_input="$initial_message"
+            initial_message=""  # Clear after first use
+        else
+            read -p "Tú: " -r user_input
+        fi
+
+        # Check for exit
+        if [[ "$user_input" == "exit" ]] || [[ "$user_input" == "quit" ]]; then
+            log_info "Saliendo del asistente..."
+            break
+        fi
+
+        # Skip empty input
+        if [[ -z "$user_input" ]]; then
+            continue
+        fi
+
+        # Build context-aware prompt
+        local prompt="Eres un asistente experto en release management y git workflows.
+
+El usuario está trabajando en un release y necesita ayuda.
+
+Usuario pregunta: $user_input
+
+Repositorio actual:
+- Directorio: $(pwd)
+- Branch actual: $(git_current_branch 2>/dev/null || echo "unknown")
+- Último commit: $(git log -1 --oneline 2>/dev/null || echo "unknown")
+
+Proporciona una respuesta útil, concisa y accionable. Si es necesario ejecutar comandos, indícalos claramente."
+
+        # Call Claude
+        echo ""
+        echo "Claude:"
+        local response
+        response=$(claude_api_call "$prompt" 1024)
+
+        if [[ $? -eq 0 ]]; then
+            echo "$response"
+        else
+            log_error "Error al comunicarse con Claude"
+        fi
+        echo ""
+    done
+}
+
+# Export functions
+export -f claude_is_configured
+export -f claude_api_call
+export -f claude_suggest_version
+export -f claude_generate_notes
+export -f claude_validate_changes
+export -f claude_assist

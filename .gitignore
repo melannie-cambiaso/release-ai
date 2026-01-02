@@ -1,0 +1,29 @@
+# Release state files
+.release-state.json
+scripts/.release-state.json
+
+# Configuration files with API keys
+.release-ai.config.json
+config.json
+
+# Global config (not in repo, but documenting)
+# ~/.config/release-ai/config.json
+
+# Cache
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.backup

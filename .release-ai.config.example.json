@@ -1,0 +1,35 @@
+{
+  "main_branch": "main",
+  "develop_branch": "develop",
+  "pr_target_branch": "main",
+  "version_files": [
+    {
+      "path": "package.json",
+      "field": "version"
+    },
+    {
+      "path": "app.json",
+      "field": "expo.version"
+    }
+  ],
+  "release_notes_dir": ".releases",
+  "ai_features": {
+    "auto_suggest_version": true,
+    "generate_notes": true,
+    "validate_changes": true,
+    "conversational_mode": false
+  },
+  "commit_conventions": {
+    "types": ["feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "build", "revert"],
+    "breaking_change_indicators": ["!", "BREAKING CHANGE:"]
+  },
+  "claude": {
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": {
+      "suggest_version": 500,
+      "generate_notes": 2048,
+      "validate_changes": 1024,
+      "assist": 1024
+    }
+  }
+}

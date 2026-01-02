@@ -1,0 +1,23 @@
+# Release v{VERSION}
+
+{DESCRIPTION}
+
+## 🚀 Features
+
+{FEATURES}
+
+## 🐛 Bug Fixes
+
+{FIXES}
+
+## 💥 Breaking Changes
+
+{BREAKING_CHANGES}
+
+## 📝 Other Changes
+
+{OTHERS}
+
+---
+
+🤖 Generated with [release-ai](https://github.com/your-username/release-ai)

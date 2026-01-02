@@ -1,0 +1,807 @@
+#!/usr/bin/env bash
+# release-ai - Automated release management with Claude AI
+# Usage: release-ai <command> [options]
+
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
+# Version
+VERSION="1.0.0"
+
+# Determine script directory and library directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="${RELEASE_AI_LIB_DIR:-${SCRIPT_DIR}/../lib}"
+TEMPLATES_DIR="${RELEASE_AI_TEMPLATES_DIR:-${SCRIPT_DIR}/../templates}"
+
+# Repository root (current working directory)
+REPO_ROOT="$(pwd)"
+
+# Source library functions
+source "${LIB_DIR}/logging.sh"
+source "${LIB_DIR}/version-manager.sh"
+source "${LIB_DIR}/git-operations.sh"
+source "${LIB_DIR}/json-updater.sh"
+
+# Source Claude integration if available
+if [[ -f "${LIB_DIR}/claude-integration.sh" ]]; then
+    source "${LIB_DIR}/claude-integration.sh"
+fi
+
+# Configuration
+PACKAGE_JSON="${REPO_ROOT}/package.json"
+APP_JSON="${REPO_ROOT}/app.json"
+
+# Load branch configuration from config files
+MAIN_BRANCH="$(get_config "main_branch" "main")"
+DEVELOP_BRANCH="$(get_config "develop_branch" "develop")"
+PR_TARGET_BRANCH="$(get_config "pr_target_branch" "main")"
+
+# Validate prerequisites
+validate_prerequisites() {
+    log_phase "Validando prerequisitos"
+
+    # Validate required tools
+    if ! validate_required_tools; then
+        return 1
+    fi
+
+    # Verify git repository
+    cd "$REPO_ROOT" || {
+        log_error "No se puede acceder al directorio del repositorio: $REPO_ROOT"
+        return 1
+    }
+
+    if ! git_verify_repo; then
+        return 1
+    fi
+
+    # Check gh CLI authentication
+    if ! gh_is_authenticated; then
+        return 1
+    fi
+
+    log_success "Prerequisitos validados"
+    return 0
+}
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+# Helper: Create PR with gh CLI
+create_pull_request() {
+    local branch_name="$1"
+    local version="$2"
+
+    local title="Release v${version}"
+    local body="Release version ${version}
+
+## Summary
+See release notes at: \`.releases/release-notes-${version}.md\`
+
+## Checklist
+- [ ] All tests passing
+- [ ] Release notes reviewed
+- [ ] Version bumped in package.json and app.json
+
+---
+🤖 Generated with release-ai"
+
+    log_info "Creando PR con gh CLI..."
+
+    local pr_url
+    pr_url=$(gh pr create \
+        --base "$PR_TARGET_BRANCH" \
+        --head "$branch_name" \
+        --title "$title" \
+        --body "$body" \
+        --json url --jq .url 2>&1)
+
+    if [[ $? -ne 0 ]]; then
+        log_error "Error al crear PR: $pr_url"
+        return 1
+    fi
+
+    log_success "PR creado: $pr_url"
+    echo "$pr_url"
+}
+
+# Helper: Rollback version changes
+rollback_version_changes() {
+    local package_json="$1"
+    local app_json="$2"
+
+    log_warn "Revertiendo cambios de versión..."
+    git checkout HEAD -- "$package_json" "$app_json" 2>&1 || true
+}
+
+# =============================================================================
+# COMMANDS
+# =============================================================================
+
+# cmd_init: Initialize release-ai in the current project
+cmd_init() {
+    log_phase "Inicializando release-ai en el proyecto"
+
+    # Check if config already exists
+    if [[ -f ".release-ai.config.json" ]]; then
+        log_warn "El archivo .release-ai.config.json ya existe"
+        read -p "¿Deseas sobrescribirlo? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Operación cancelada"
+            return 0
+        fi
+    fi
+
+    # Copy example config
+    if [[ -f "${SCRIPT_DIR}/../.release-ai.config.example.json" ]]; then
+        cp "${SCRIPT_DIR}/../.release-ai.config.example.json" ".release-ai.config.json"
+        log_success "Archivo .release-ai.config.json creado"
+    else
+        log_error "No se encontró el archivo de configuración de ejemplo"
+        return 1
+    fi
+
+    # Create global config directory if it doesn't exist
+    mkdir -p "$HOME/.config/release-ai"
+
+    # Check if global config exists
+    if [[ ! -f "$HOME/.config/release-ai/config.json" ]]; then
+        log_info "Creando configuración global"
+
+        # Ask for API key
+        read -p "¿Deseas configurar tu API key de Claude ahora? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            read -p "Ingresa tu API key de Anthropic: " -r api_key
+            echo "{\"anthropic_api_key\": \"$api_key\"}" > "$HOME/.config/release-ai/config.json"
+            chmod 600 "$HOME/.config/release-ai/config.json"
+            log_success "API key guardada en ~/.config/release-ai/config.json"
+        else
+            echo "{}" > "$HOME/.config/release-ai/config.json"
+            log_info "Puedes agregar tu API key más tarde editando ~/.config/release-ai/config.json"
+        fi
+    fi
+
+    log_success "release-ai inicializado correctamente"
+    echo ""
+    log_info "Próximos pasos:"
+    echo "  1. Edita .release-ai.config.json con la configuración de tu proyecto"
+    echo "  2. Ejecuta 'release-ai start <version>' para crear un nuevo release"
+    echo "  3. Usa 'release-ai suggest' para que Claude sugiera la próxima versión"
+}
+
+# cmd_config: Show current configuration
+cmd_config() {
+    log_phase "Configuración actual"
+
+    echo "Branches:"
+    echo "  Main: $MAIN_BRANCH"
+    echo "  Develop: $DEVELOP_BRANCH"
+    echo "  PR Target: $PR_TARGET_BRANCH"
+    echo ""
+
+    echo "Archivos de configuración:"
+    if [[ -f ".release-ai.config.json" ]]; then
+        echo "  ✓ Proyecto: .release-ai.config.json"
+    else
+        echo "  ✗ Proyecto: No encontrado"
+    fi
+
+    if [[ -f "$HOME/.config/release-ai/config.json" ]]; then
+        echo "  ✓ Global: ~/.config/release-ai/config.json"
+    else
+        echo "  ✗ Global: No encontrado"
+    fi
+    echo ""
+
+    echo "Claude AI:"
+    if claude_is_configured 2>/dev/null; then
+        echo "  ✓ API key configurada"
+        local model=$(get_config "claude.model" "claude-sonnet-4-5-20250929")
+        echo "  Modelo: $model"
+    else
+        echo "  ✗ API key no configurada"
+        echo "  Ejecuta 'release-ai init' para configurar"
+    fi
+}
+
+# cmd_version: Show version
+cmd_version() {
+    echo "release-ai v${VERSION}"
+}
+
+# =============================================================================
+# RELEASE COMMANDS
+# =============================================================================
+
+# cmd_start: Create release branch and PR (PHASE 1)
+cmd_start() {
+    local version="$1"
+
+    # Check for --auto flag
+    if [[ "$version" == "--auto" ]]; then
+        if ! claude_is_configured; then
+            log_error "Claude AI no está configurado. Usa 'release-ai init' o proporciona una versión manualmente."
+            return 1
+        fi
+
+        log_info "Solicitando sugerencia de versión a Claude AI..."
+        local suggestion
+        suggestion=$(claude_suggest_version)
+
+        if [[ $? -ne 0 ]]; then
+            log_error "No se pudo obtener sugerencia de versión"
+            return 1
+        fi
+
+        # Parse JSON response
+        version=$(echo "$suggestion" | jq -r '.suggested_version' 2>/dev/null)
+
+        if [[ -z "$version" || "$version" == "null" ]]; then
+            log_error "Respuesta inválida de Claude AI"
+            return 1
+        fi
+
+        echo ""
+        log_info "Claude AI sugiere: v${version}"
+        echo "$suggestion" | jq -r '.reasoning' 2>/dev/null || echo ""
+        echo ""
+
+        read -p "¿Deseas usar esta versión? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Operación cancelada"
+            return 0
+        fi
+    fi
+
+    if [[ -z "$version" ]]; then
+        log_error "Versión no proporcionada"
+        echo "Uso: release-ai start <version>"
+        echo "     release-ai start --auto (con Claude AI)"
+        return 1
+    fi
+
+    # Validate version format
+    if ! validate_version "$version"; then
+        return 1
+    fi
+
+    log_phase "Iniciando release ${version}"
+
+    # Save state
+    save_state "phase" "start"
+    save_state "version" "$version"
+    save_state "start_time" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    # Step 1: Checkout develop and pull
+    log_step "1" "Cambiando a branch develop"
+    pause_for_keypass "A punto de cambiar a develop y obtener cambios"
+
+    if ! git_safe_checkout "$DEVELOP_BRANCH"; then
+        return 1
+    fi
+
+    if ! git_safe_pull; then
+        return 1
+    fi
+
+    local develop_commit
+    develop_commit=$(git_get_commit_hash HEAD)
+    save_state "develop_commit" "$develop_commit"
+
+    # Step 2: Create release branch
+    local branch_name="release-${version}"
+    save_state "branch_name" "$branch_name"
+
+    log_step "2" "Creando branch de release: ${branch_name}"
+
+    if ! git_create_branch "$branch_name"; then
+        log_error "No se pudo crear el branch de release"
+        return 1
+    fi
+
+    # Update version in files
+    log_step "2a" "Actualizando package.json a versión ${version}"
+    if ! update_json_version "$PACKAGE_JSON" "$version"; then
+        rollback_version_changes "$PACKAGE_JSON" "$APP_JSON"
+        return 1
+    fi
+
+    log_step "2b" "Actualizando app.json a versión ${version}"
+    if ! update_expo_version "$APP_JSON" "$version"; then
+        rollback_version_changes "$PACKAGE_JSON" "$APP_JSON"
+        return 1
+    fi
+
+    # Verify versions
+    if ! verify_version_update "$PACKAGE_JSON" "$APP_JSON" "$version"; then
+        rollback_version_changes "$PACKAGE_JSON" "$APP_JSON"
+        return 1
+    fi
+
+    # Commit version bump
+    local commit_msg
+    commit_msg="chore(release): bump version to ${version}
+
+🤖 Generated with [release-ai](https://github.com/your-username/release-ai)"
+
+    log_step "2c" "Haciendo commit del bump de versión"
+
+    git add "$PACKAGE_JSON" "$APP_JSON"
+
+    if ! git commit -m "$commit_msg" 2>&1; then
+        log_error "Fallo al hacer commit"
+        return 1
+    fi
+
+    local bump_commit
+    bump_commit=$(git_get_commit_hash HEAD)
+    save_state "bump_commit" "$bump_commit"
+    log_success "Commit de bump: ${bump_commit:0:7}"
+
+    # Step 3: Push release branch
+    log_step "3" "Enviando branch de release al remoto"
+    pause_for_keypass "A punto de enviar el branch de release"
+
+    if ! git_safe_push -u origin "$branch_name"; then
+        return 1
+    fi
+
+    # Step 4: Create PR
+    log_step "4" "Creando Pull Request"
+
+    local pr_url
+    if ! pr_url=$(create_pull_request "$branch_name" "$version"); then
+        log_error "Fallo al crear PR"
+        return 1
+    fi
+
+    save_state "pr_url" "$pr_url"
+    save_state "phase" "start_complete"
+
+    log_success "Branch de release creado exitosamente"
+
+    # Output JSON for easy parsing
+    cat <<EOF
+{
+  "status": "success",
+  "phase": "start_complete",
+  "version": "${version}",
+  "branch": "${branch_name}",
+  "pr_url": "${pr_url}",
+  "bump_commit": "${bump_commit}"
+}
+EOF
+}
+
+# cmd_merge: Prepare merge with main (PHASE 2)
+cmd_merge() {
+    log_phase "Preparando merge con main"
+
+    local version
+    version=$(get_state "version")
+    local branch_name
+    branch_name=$(get_state "branch_name")
+    local bump_commit
+    bump_commit=$(get_state "bump_commit")
+
+    if [[ -z "$version" || -z "$branch_name" || -z "$bump_commit" ]]; then
+        log_error "Estado incompleto. ¿Ejecutaste 'release-ai start' primero?"
+        return 1
+    fi
+
+    save_state "phase" "merge"
+
+    # Step 6: Cherry-pick version bump to develop
+    log_step "6" "Aplicando cherry-pick del bump de versión a develop"
+
+    if ! git_safe_checkout "$DEVELOP_BRANCH"; then
+        return 1
+    fi
+
+    if ! git_safe_cherry_pick "$bump_commit"; then
+        log_error "Fallo al hacer cherry-pick. Resuelve los conflictos manualmente."
+        return 1
+    fi
+
+    save_state "develop_cherry_picked" "true"
+    log_success "Cherry-pick aplicado a develop"
+
+    # Step 7: Checkout main and pull
+    log_step "7" "Cambiando a branch main"
+    pause_for_keypass "A punto de cambiar a main y obtener cambios"
+
+    if ! git_safe_checkout "$MAIN_BRANCH"; then
+        return 1
+    fi
+
+    if ! git_safe_pull; then
+        return 1
+    fi
+
+    # Step 8: Merge release to main with 'ours' strategy
+    log_step "8" "Mergeando branch de release con main (estrategia ours)"
+
+    if ! git_safe_checkout "$branch_name"; then
+        return 1
+    fi
+
+    # Merge main into release, preferring release changes
+    if ! git_safe_merge "$MAIN_BRANCH" "ours" "Merge ${MAIN_BRANCH} into ${branch_name} with ours strategy"; then
+        log_error "Fallo al hacer merge. Resuelve los conflictos manualmente."
+        return 1
+    fi
+
+    save_state "merge_complete" "true"
+    save_state "phase" "merge_complete"
+
+    log_success "Preparación de merge completada"
+
+    # Output JSON
+    cat <<EOF
+{
+  "status": "success",
+  "phase": "merge_complete",
+  "message": "Branch de release mergeado con main. Esperando aprobación del PR."
+}
+EOF
+}
+
+# cmd_finalize: Create tag and complete release (PHASE 3)
+cmd_finalize() {
+    log_phase "Finalizando release"
+
+    local version
+    version=$(get_state "version")
+    local branch_name
+    branch_name=$(get_state "branch_name")
+
+    if [[ -z "$version" || -z "$branch_name" ]]; then
+        log_error "Estado incompleto. ¿Ejecutaste las fases anteriores?"
+        return 1
+    fi
+
+    save_state "phase" "finalize"
+
+    # Step 10: Pull latest main
+    log_step "10" "Obteniendo últimos cambios de main"
+    pause_for_keypass "A punto de obtener cambios de main"
+
+    if ! git_safe_checkout "$MAIN_BRANCH"; then
+        return 1
+    fi
+
+    if ! git_safe_pull; then
+        return 1
+    fi
+
+    # Step 11: Create and push tag
+    log_step "11" "Creando tag de release"
+
+    local tag_name="v${version}"
+    local tag_message="Release v${version}"
+
+    if ! git_create_tag "$tag_name" "$tag_message"; then
+        return 1
+    fi
+
+    save_state "tag_name" "$tag_name"
+
+    pause_for_keypass "A punto de enviar tags al remoto"
+
+    if ! git_push_tags; then
+        return 1
+    fi
+
+    # Step 12: Push develop with cherry-picked commit
+    log_step "12" "Enviando branch develop al remoto"
+
+    if ! git_safe_checkout "$DEVELOP_BRANCH"; then
+        return 1
+    fi
+
+    if ! git_safe_push; then
+        return 1
+    fi
+
+    save_state "phase" "complete"
+    save_state "end_time" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    log_success "Release ${version} completado exitosamente!"
+
+    # Output JSON
+    cat <<EOF
+{
+  "status": "success",
+  "phase": "complete",
+  "version": "${version}",
+  "tag": "${tag_name}",
+  "branch": "${branch_name}"
+}
+EOF
+}
+
+# cmd_rollback: Rollback failed release
+cmd_rollback() {
+    log_error "Iniciando rollback del release"
+
+    local phase
+    phase=$(get_state "phase")
+    local branch_name
+    branch_name=$(get_state "branch_name")
+    local version
+    version=$(get_state "version")
+
+    if [[ -z "$phase" ]]; then
+        log_warn "No hay estado de release para hacer rollback"
+        return 0
+    fi
+
+    log_info "Fase actual: $phase"
+    log_info "Branch: $branch_name"
+    log_info "Versión: $version"
+
+    case "$phase" in
+        start|start_complete|merge|merge_complete)
+            log_info "Limpiando branch de release..."
+
+            # Return to develop
+            git_safe_checkout "$DEVELOP_BRANCH" || true
+
+            # Delete release branch
+            if [[ -n "$branch_name" ]]; then
+                git_delete_branch "$branch_name" "true"
+            fi
+
+            # Reset develop if cherry-pick was done
+            local cherry_picked
+            cherry_picked=$(get_state "develop_cherry_picked")
+            if [[ "$cherry_picked" == "true" ]]; then
+                log_info "Reseteando cherry-pick en develop..."
+                git reset --hard origin/"$DEVELOP_BRANCH" 2>&1 || log_warn "No se pudo resetear develop"
+            fi
+
+            log_success "Rollback completado"
+            ;;
+
+        finalize|complete)
+            log_error "No se puede hacer rollback desde la fase '${phase}'"
+            log_error "Los tags pueden haber sido enviados al remoto"
+            log_info "Rollback manual requerido"
+            return 1
+            ;;
+
+        *)
+            log_warn "Fase desconocida: $phase"
+            ;;
+    esac
+
+    # Clear state
+    clear_state
+
+    return 0
+}
+
+# =============================================================================
+# CLAUDE AI COMMANDS
+# =============================================================================
+
+# cmd_suggest: Claude suggests next version
+cmd_suggest() {
+    if ! claude_is_configured; then
+        log_error "Claude AI no está configurado"
+        log_info "Ejecuta 'release-ai init' para configurar tu API key"
+        return 1
+    fi
+
+    validate_prerequisites || return 1
+
+    local suggestion
+    suggestion=$(claude_suggest_version)
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    # Display formatted output
+    echo ""
+    log_success "Sugerencia de Claude AI:"
+    echo "$suggestion" | jq . 2>/dev/null || echo "$suggestion"
+}
+
+# cmd_notes: Generate release notes with Claude
+cmd_notes() {
+    local version="$1"
+
+    if [[ -z "$version" ]]; then
+        log_error "Versión no proporcionada"
+        echo "Uso: release-ai notes <version>"
+        return 1
+    fi
+
+    if ! claude_is_configured; then
+        log_error "Claude AI no está configurado"
+        log_info "Ejecuta 'release-ai init' para configurar tu API key"
+        return 1
+    fi
+
+    validate_prerequisites || return 1
+
+    # Create output directory
+    local notes_dir=$(get_config "release_notes_dir" ".releases")
+    mkdir -p "$notes_dir"
+
+    local output_file="${notes_dir}/release-notes-${version}.md"
+
+    claude_generate_notes "$version" "$output_file"
+
+    if [[ $? -eq 0 ]]; then
+        echo ""
+        log_success "Release notes generadas exitosamente"
+        log_info "Archivo: $output_file"
+    fi
+}
+
+# cmd_validate: Validate changes with Claude
+cmd_validate() {
+    if ! claude_is_configured; then
+        log_error "Claude AI no está configurado"
+        log_info "Ejecuta 'release-ai init' para configurar tu API key"
+        return 1
+    fi
+
+    validate_prerequisites || return 1
+
+    local validation
+    validation=$(claude_validate_changes)
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    echo ""
+    log_info "Validación de Claude AI:"
+    echo "$validation"
+}
+
+# cmd_assist: Interactive Claude assistant
+cmd_assist() {
+    if ! claude_is_configured; then
+        log_error "Claude AI no está configurado"
+        log_info "Ejecuta 'release-ai init' para configurar tu API key"
+        return 1
+    fi
+
+    claude_assist
+}
+
+# print_help: Show help message
+print_help() {
+    cat << EOF
+release-ai v${VERSION} - Automated release management with Claude AI
+
+Usage: release-ai <command> [options]
+
+Commands:
+  init                     Initialize release-ai in current project
+  start <version>          Create release branch and PR
+  start --auto             Auto-suggest version with Claude AI
+  merge                    Prepare merge with main
+  finalize                 Create tag and complete release
+  rollback                 Rollback failed release
+
+  suggest                  Claude suggests next version based on commits
+  notes <version>          Generate release notes with Claude
+  validate                 Claude validates changes pre-release
+  assist                   Interactive Claude assistant for releases
+
+  config                   Show current configuration
+  version                  Show version
+  help                     Show this help message
+
+Flags:
+  --help, -h               Show help
+  --no-ai                  Disable AI features
+  --dry-run                Simulate without making changes
+  --verbose, -v            Verbose output
+
+Examples:
+  # Initialize in project
+  release-ai init
+
+  # Traditional release
+  release-ai start 1.2.0
+
+  # AI-assisted release
+  release-ai suggest
+  release-ai start --auto
+  release-ai validate
+  release-ai notes 1.2.0
+
+Documentation: https://github.com/your-username/release-ai
+EOF
+}
+
+# =============================================================================
+# MAIN DISPATCHER
+# =============================================================================
+
+main() {
+    local command="${1:-}"
+
+    # Handle empty command
+    if [[ -z "$command" ]]; then
+        print_help
+        exit 0
+    fi
+
+    # Handle global flags
+    case "$command" in
+        --help|-h|help)
+            print_help
+            exit 0
+            ;;
+        --version|-v|version)
+            cmd_version
+            exit 0
+            ;;
+    esac
+
+    # Change to repo root
+    cd "$REPO_ROOT" || {
+        log_error "Error: No se puede acceder al directorio del repositorio"
+        exit 1
+    }
+
+    # Dispatch commands
+    case "$command" in
+        init)
+            cmd_init
+            ;;
+        config)
+            cmd_config
+            ;;
+        version)
+            cmd_version
+            ;;
+        start)
+            shift
+            validate_prerequisites || exit 1
+            cmd_start "$@"
+            ;;
+        merge)
+            validate_prerequisites || exit 1
+            cmd_merge
+            ;;
+        finalize)
+            validate_prerequisites || exit 1
+            cmd_finalize
+            ;;
+        rollback)
+            cmd_rollback
+            ;;
+        suggest)
+            cmd_suggest
+            ;;
+        notes)
+            shift
+            cmd_notes "$@"
+            ;;
+        validate)
+            cmd_validate
+            ;;
+        assist)
+            cmd_assist
+            ;;
+        *)
+            log_error "Comando desconocido: $command"
+            echo ""
+            print_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
