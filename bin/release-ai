@@ -88,18 +88,22 @@ See release notes at: \`.releases/release-notes-${version}.md\`
 
     log_info "Creando PR con gh CLI..."
 
-    local pr_url
-    pr_url=$(gh pr create \
+    # Create PR and capture output
+    local pr_output
+    pr_output=$(gh pr create \
         --base "$PR_TARGET_BRANCH" \
         --head "$branch_name" \
         --title "$title" \
-        --body "$body" \
-        --json url --jq .url 2>&1)
+        --body "$body" 2>&1)
 
     if [[ $? -ne 0 ]]; then
-        log_error "Error al crear PR: $pr_url"
+        log_error "Error al crear PR: $pr_output"
         return 1
     fi
+
+    # Extract URL from output (last line is typically the URL)
+    local pr_url
+    pr_url=$(echo "$pr_output" | tail -1)
 
     log_success "PR creado: $pr_url"
     echo "$pr_url"
