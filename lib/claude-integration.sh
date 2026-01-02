@@ -29,9 +29,9 @@ claude_api_call() {
     # Escape prompt for JSON (replace newlines and quotes)
     local escaped_prompt=$(echo "$prompt" | jq -Rs .)
 
-    # Make API call
+    # Make API call with timeout
     local response
-    response=$(curl -s https://api.anthropic.com/v1/messages \
+    response=$(curl -s --max-time 30 https://api.anthropic.com/v1/messages \
         -H "content-type: application/json" \
         -H "x-api-key: $api_key" \
         -H "anthropic-version: 2023-06-01" \
@@ -42,7 +42,17 @@ claude_api_call() {
                 \"role\": \"user\",
                 \"content\": $escaped_prompt
             }]
-        }")
+        }"
+    )
+
+    local curl_exit=$?
+    if [[ $curl_exit -ne 0 ]]; then
+        log_error "Error en conexión con Claude API (código: $curl_exit)"
+        if [[ $curl_exit -eq 28 ]]; then
+            log_error "Timeout: La API no respondió en 30 segundos"
+        fi
+        return 1
+    fi
 
     # Check for errors
     if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
@@ -69,6 +79,8 @@ claude_suggest_version() {
         return 1
     fi
 
+    log_info "Commits obtenidos: $(echo "$commits" | wc -l) líneas"
+
     # Get current version
     local current_version
     current_version=$(get_current_version "$PACKAGE_JSON")
@@ -77,6 +89,8 @@ claude_suggest_version() {
         log_error "No se pudo obtener la versión actual de package.json"
         return 1
     fi
+
+    log_info "Versión actual: $current_version"
 
     # Build prompt
     local prompt="Eres un experto en semantic versioning y conventional commits.
@@ -104,13 +118,18 @@ Instrucciones:
 
 Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones adicionales."
 
+    log_info "Enviando solicitud a Claude API..."
+
     # Call Claude
     local response
     response=$(claude_api_call "$prompt" 500)
 
     if [[ $? -ne 0 ]]; then
+        log_error "Fallo al llamar a Claude API"
         return 1
     fi
+
+    log_info "Respuesta recibida de Claude API"
 
     # Parse and display response
     echo "$response"

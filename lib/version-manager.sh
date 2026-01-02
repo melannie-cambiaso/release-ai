@@ -66,7 +66,32 @@ compare_versions() {
 # Get last release tag from git
 get_last_release_tag() {
     local tag
+
+    # Try git describe first (works if there's a tag in current branch history)
     tag=$(git describe --tags --abbrev=0 2>/dev/null)
+
+    # If git describe fails, look for version bump commits in current branch
+    # This handles workflows where tags are in main but version bumps are cherry-picked to develop
+    if [[ -z "$tag" ]]; then
+        local version_commit=$(git log --no-merges --grep="^chore(release): bump version to" --format="%s" -1 2>/dev/null)
+        if [[ -n "$version_commit" ]]; then
+            # Extract version from commit message: "chore(release): bump version to 1.8.2" -> "v1.8.2"
+            local version=$(echo "$version_commit" | sed -n 's/^chore(release): bump version to \([0-9.]*\)$/\1/p')
+            if [[ -n "$version" ]]; then
+                tag="v${version}"
+            fi
+        fi
+    fi
+
+    # If still no tag found, try to find the most recent tag that is an ancestor of HEAD
+    if [[ -z "$tag" ]]; then
+        tag=$(git tag --sort=-committerdate | while read -r t; do
+            if git merge-base --is-ancestor "$t" HEAD 2>/dev/null; then
+                echo "$t"
+                break
+            fi
+        done)
+    fi
 
     if [[ -z "$tag" ]]; then
         log_warn "No se encontraron tags previos"
@@ -124,9 +149,24 @@ get_commits_since_last_tag() {
     if [[ -z "$last_tag" ]]; then
         # If no tags, get all commits
         git log --no-merges --pretty=format:'%H|%s|%b'
-    else
-        # Get commits since last tag
+        return
+    fi
+
+    # Extract version from tag
+    local version=$(echo "$last_tag" | sed 's/^v//')
+
+    # Always look for version bump commit first (more accurate for develop branch workflow)
+    local bump_commit=$(git log --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+
+    if [[ -n "$bump_commit" ]]; then
+        # Found version bump commit in current branch, use it
+        git log --no-merges --pretty=format:'%H|%s|%b' "${bump_commit}..HEAD"
+    elif git rev-parse "$last_tag" &>/dev/null; then
+        # Fallback: use the tag directly
         git log --no-merges --pretty=format:'%H|%s|%b' "${last_tag}..HEAD"
+    else
+        # Last resort: get all commits
+        git log --no-merges --pretty=format:'%H|%s|%b'
     fi
 }
 
