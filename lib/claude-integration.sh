@@ -160,18 +160,16 @@ Genera release notes profesionales en español para la versión $version basánd
 $commits
 
 Instrucciones:
-1. Agrupa los cambios por categorías: Features, Bug Fixes, Breaking Changes, Other Changes
-2. Usa formato markdown limpio y profesional
-3. Cada ítem debe ser claro y conciso
-4. Si hay breaking changes, resáltalos con ⚠️
-5. Usa emojis apropiados: 🚀 features, 🐛 fixes, 💥 breaking, 📝 docs, etc.
-6. Incluye una breve descripción al inicio resumiendo los cambios principales
+1. Comienza con una descripción breve (1-2 frases) resumiendo los cambios principales
+2. Agrupa los cambios por categorías: Features, Bug Fixes, Breaking Changes, Other Changes
+3. Usa formato markdown limpio y profesional (NO incluyas título principal H1, comenzar con la descripción)
+4. Cada ítem debe ser claro y conciso
+5. Si hay breaking changes, resáltalos con ⚠️
+6. Usa emojis apropiados: 🚀 features, 🐛 fixes, 💥 breaking, 📝 docs, etc.
 
-Formato esperado:
+Formato esperado (SIN título H1):
 
-# Release v${version}
-
-[Descripción breve del release]
+[Descripción breve del release en 1-2 frases]
 
 ## 🚀 Features
 - Descripción de feature 1
@@ -187,7 +185,7 @@ Formato esperado:
 ## 📝 Other Changes
 - Otros cambios relevantes
 
-Genera solo el contenido markdown, sin comillas ni delimitadores de código."
+Genera solo el contenido markdown, sin comillas ni delimitadores de código. NO incluyas el título \"# Release v${version}\"."
 
     # Call Claude
     local notes

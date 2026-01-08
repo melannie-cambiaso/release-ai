@@ -71,20 +71,38 @@ validate_prerequisites() {
 create_pull_request() {
     local branch_name="$1"
     local version="$2"
+    local release_notes="${3:-}"
 
     local title="Release v${version}"
-    local body="Release version ${version}
+    local body
 
-## Summary
-See release notes at: \`.releases/release-notes-${version}.md\`
-
-## Checklist
-- [ ] All tests passing
-- [ ] Release notes reviewed
-- [ ] Version bumped in package.json and app.json
+    # Use AI-generated notes if available, otherwise use default template
+    if [[ -n "$release_notes" ]]; then
+        body="$release_notes
 
 ---
-🤖 Generated with release-ai"
+
+## ✅ Checklist
+- [ ] All tests passing
+- [ ] Release notes reviewed
+- [ ] Version files updated
+
+---
+🤖 Generated with [release-ai](https://github.com/your-username/release-ai)"
+    else
+        body="Release version ${version}
+
+## 📝 Summary
+This PR contains the version bump and changes for release v${version}.
+
+## ✅ Checklist
+- [ ] All tests passing
+- [ ] Release notes reviewed
+- [ ] Version files updated
+
+---
+🤖 Generated with [release-ai](https://github.com/your-username/release-ai)"
+    fi
 
     log_info "Creando PR con gh CLI..."
 
@@ -434,19 +452,37 @@ cmd_start() {
     save_state "bump_commit" "$bump_commit"
     log_success "Commit de bump: ${bump_commit:0:7}"
 
-    # Step 3: Push release branch
-    log_step "3" "Enviando branch de release al remoto"
+    # Step 3: Generate release notes with Claude AI
+    log_step "3" "Generando release notes con Claude AI"
+
+    local release_notes
+    if command -v claude_generate_notes &> /dev/null; then
+        release_notes=$(claude_generate_notes "$version" 2>/dev/null)
+        if [[ $? -eq 0 ]] && [[ -n "$release_notes" ]]; then
+            log_success "Release notes generadas exitosamente"
+            save_state "release_notes" "$release_notes"
+        else
+            log_warn "No se pudieron generar release notes con Claude, usando template por defecto"
+            release_notes=""
+        fi
+    else
+        log_warn "Claude integration no disponible, usando template por defecto"
+        release_notes=""
+    fi
+
+    # Step 4: Push release branch
+    log_step "4" "Enviando branch de release al remoto"
     pause_for_keypass "A punto de enviar el branch de release"
 
     if ! git_safe_push -u origin "$branch_name"; then
         return 1
     fi
 
-    # Step 4: Create PR
-    log_step "4" "Creando Pull Request"
+    # Step 5: Create PR with generated notes
+    log_step "5" "Creando Pull Request"
 
     local pr_url
-    if ! pr_url=$(create_pull_request "$branch_name" "$version"); then
+    if ! pr_url=$(create_pull_request "$branch_name" "$version" "$release_notes"); then
         log_error "Fallo al crear PR"
         return 1
     fi
