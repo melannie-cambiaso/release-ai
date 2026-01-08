@@ -95,17 +95,40 @@ update_js_config_field() {
     # e.g., "expo.version" -> find "version: " within expo object
     local field_name="${field_path##*.}"  # Get last part after last dot
 
-    # Use sed to replace version value in JS file
-    # This is a simple approach - may need refinement for complex JS structures
-    if sed -i.tmp "s/\(${field_name}:[[:space:]]*['\"\`]\)[^'\"]*\(['\"\`]\)/\1${new_version}\2/g" "$js_file"; then
-        rm -f "${js_file}.tmp"
+    # Detect OS for sed compatibility
+    local sed_inplace_flag
+    if [[ "$(uname)" == "Darwin" ]]; then
+        sed_inplace_flag="-i ''"
+    else
+        sed_inplace_flag="-i"
+    fi
+
+    # Multiple patterns to handle different JS formats:
+    # version: '1.0.0' or version: "1.0.0" or version: `1.0.0`
+    # "version": "1.0.0" or 'version': '1.0.0'
+    local patterns=(
+        "s/\(${field_name}:[[:space:]]*['\"\`]\)[^'\"]*\(['\"\`]\)/\1${new_version}\2/g"
+        "s/\(['\"]${field_name}['\"]:[[:space:]]*['\"\`]\)[^'\"]*\(['\"\`]\)/\1${new_version}\2/g"
+    )
+
+    local updated=false
+    for pattern in "${patterns[@]}"; do
+        if grep -q "${field_name}" "$js_file"; then
+            if [[ "$(uname)" == "Darwin" ]]; then
+                sed -i '' "$pattern" "$js_file" 2>/dev/null && updated=true
+            else
+                sed -i "$pattern" "$js_file" 2>/dev/null && updated=true
+            fi
+        fi
+    done
+
+    if $updated; then
         rm -f "${js_file}.bak"
         log_success "Campo ${field_path} actualizado a ${new_version} en $(basename "$js_file")"
         return 0
     else
         # Restore backup on failure
         mv "${js_file}.bak" "$js_file"
-        rm -f "${js_file}.tmp"
         log_error "Error al actualizar ${field_path} en $js_file"
         return 1
     fi
@@ -220,21 +243,32 @@ verify_all_version_updates() {
         local basename_file=$(basename "$file_path")
 
         # Get version based on file type
-        case "$file_ext" in
-            json)
-                actual_version=$(jq -r ".${field}" "$file_path" 2>/dev/null)
-                ;;
-            js)
-                # Extract version from JS file (simple regex)
-                local field_name="${field##*.}"
-                actual_version=$(grep -oP "${field_name}:[[:space:]]*['\"\`]\K[^'\"]*" "$file_path" 2>/dev/null | head -1)
-                ;;
-            *)
-                if [[ "$basename_file" == "VERSION" ]]; then
-                    actual_version=$(cat "$file_path" | tr -d '\n')
-                fi
-                ;;
-        esac
+        # Check if field is empty or null (plain text file)
+        if [[ -z "$field" ]] || [[ "$field" == "null" ]]; then
+            # Plain text file
+            actual_version=$(cat "$file_path" | tr -d '\n\r' | xargs)
+        else
+            case "$file_ext" in
+                json)
+                    actual_version=$(jq -r ".${field}" "$file_path" 2>/dev/null)
+                    ;;
+                js)
+                    # Extract version from JS file - try multiple patterns
+                    local field_name="${field##*.}"
+                    # Try different patterns for JS files
+                    actual_version=$(grep -E "${field_name}['\"]?:[[:space:]]*['\"\`]" "$file_path" 2>/dev/null | grep -oE "['\"\`][0-9]+\.[0-9]+\.[0-9]+['\"\`]" | tr -d "'\"\`" | head -1)
+
+                    # If not found, try simpler pattern
+                    if [[ -z "$actual_version" ]]; then
+                        actual_version=$(grep -oE "${field_name}:[[:space:]]*['\"\`][^'\"]*['\"\`]" "$file_path" 2>/dev/null | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+                    fi
+                    ;;
+                *)
+                    log_warn "No se pudo determinar cómo leer versión de $file_path"
+                    continue
+                    ;;
+            esac
+        fi
 
         if [[ "$actual_version" != "$expected_version" ]]; then
             log_error "Versión en $file_path ($actual_version) no coincide con la esperada ($expected_version)"
