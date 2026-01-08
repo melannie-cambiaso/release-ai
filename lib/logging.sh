@@ -66,6 +66,25 @@ get_config() {
     echo "$default"
 }
 
+# Get version_files array from config as JSON
+get_version_files_config() {
+    local config_file
+
+    # Check project config first
+    if [[ -f ".release-ai.config.json" ]]; then
+        config_file=".release-ai.config.json"
+    # Check global config
+    elif [[ -f "$HOME/.config/release-ai/config.json" ]]; then
+        config_file="$HOME/.config/release-ai/config.json"
+    else
+        echo "[]"
+        return 1
+    fi
+
+    # Extract version_files array
+    jq -c '.version_files // []' "$config_file" 2>/dev/null || echo "[]"
+}
+
 # Log levels
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $*"

@@ -109,15 +109,6 @@ See release notes at: \`.releases/release-notes-${version}.md\`
     echo "$pr_url"
 }
 
-# Helper: Rollback version changes
-rollback_version_changes() {
-    local package_json="$1"
-    local app_json="$2"
-
-    log_warn "Revertiendo cambios de versión..."
-    git checkout HEAD -- "$package_json" "$app_json" 2>&1 || true
-}
-
 # =============================================================================
 # COMMANDS
 # =============================================================================
@@ -397,34 +388,41 @@ cmd_start() {
         return 1
     fi
 
-    # Update version in files
-    log_step "2a" "Actualizando package.json a versión ${version}"
-    if ! update_json_version "$PACKAGE_JSON" "$version"; then
-        rollback_version_changes "$PACKAGE_JSON" "$APP_JSON"
-        return 1
-    fi
+    # Get version_files configuration
+    local version_files_json
+    version_files_json=$(get_version_files_config)
 
-    log_step "2b" "Actualizando app.json a versión ${version}"
-    if ! update_expo_version "$APP_JSON" "$version"; then
-        rollback_version_changes "$PACKAGE_JSON" "$APP_JSON"
+    # Update version in all configured files
+    log_step "2" "Actualizando archivos de versión a ${version}"
+    if ! update_all_version_files "$version" "$version_files_json"; then
+        rollback_all_version_changes "$version_files_json"
         return 1
     fi
 
     # Verify versions
-    if ! verify_version_update "$PACKAGE_JSON" "$APP_JSON" "$version"; then
-        rollback_version_changes "$PACKAGE_JSON" "$APP_JSON"
+    if ! verify_all_version_updates "$version" "$version_files_json"; then
+        rollback_all_version_changes "$version_files_json"
         return 1
     fi
 
-    # Commit version bump
+    # Commit version bump - add all modified version files
     local commit_msg
     commit_msg="chore(release): bump version to ${version}
 
 🤖 Generated with [release-ai](https://github.com/your-username/release-ai)"
 
-    log_step "2c" "Haciendo commit del bump de versión"
+    log_step "2b" "Haciendo commit del bump de versión"
 
-    git add "$PACKAGE_JSON" "$APP_JSON"
+    # Add all version files from config to git
+    local file_count
+    file_count=$(echo "$version_files_json" | jq 'length')
+    for ((i=0; i<file_count; i++)); do
+        local file_path
+        file_path=$(echo "$version_files_json" | jq -r ".[$i].path")
+        if [[ -f "$file_path" ]]; then
+            git add "$file_path"
+        fi
+    done
 
     if ! git commit -m "$commit_msg" 2>&1; then
         log_error "Fallo al hacer commit"

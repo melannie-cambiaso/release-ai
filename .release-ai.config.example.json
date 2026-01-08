@@ -5,11 +5,23 @@
   "version_files": [
     {
       "path": "package.json",
-      "field": "version"
+      "field": "version",
+      "description": "Standard npm package version"
     },
     {
       "path": "app.json",
-      "field": "expo.version"
+      "field": "version",
+      "description": "Expo app version (root-level field)"
+    },
+    {
+      "path": "app.config.js",
+      "field": "expo.version",
+      "description": "Expo app version (nested field in JS config)"
+    },
+    {
+      "path": "VERSION",
+      "field": "",
+      "description": "Plain text version file"
     }
   ],
   "release_notes_dir": ".releases",
