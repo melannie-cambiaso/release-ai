@@ -145,12 +145,15 @@ claude_generate_notes() {
 
     # Get commits since last tag
     local commits
-    commits=$(get_commits_since_last_tag)
+    commits=$(get_commits_since_last_tag 2>&1)
 
     if [[ -z "$commits" ]]; then
-        log_warn "No hay commits desde el último release"
+        log_error "No hay commits desde el último release"
+        log_error "Esto puede ocurrir si no hay tags previos o si no hay commits nuevos"
         return 1
     fi
+
+    log_info "Commits encontrados: $(echo "$commits" | wc -l) líneas"
 
     # Build prompt
     local prompt="Eres un experto en documentación de releases y comunicación técnica.
@@ -214,12 +217,14 @@ claude_generate_confluence_summary() {
 
     # Get commits since last tag
     local commits
-    commits=$(get_commits_since_last_tag)
+    commits=$(get_commits_since_last_tag 2>&1)
 
     if [[ -z "$commits" ]]; then
-        log_warn "No hay commits desde el último release"
+        log_error "No hay commits desde el último release para Confluence"
         return 1
     fi
+
+    log_info "Commits encontrados para Confluence: $(echo "$commits" | wc -l) líneas"
 
     # Build prompt for Confluence format
     local prompt="Eres un experto en documentación de releases y comunicación técnica.

@@ -455,42 +455,48 @@ cmd_start() {
     # Step 3: Generate release notes with Claude AI
     log_step "3" "Generando release notes con Claude AI"
 
-    local release_notes
-    if command -v claude_generate_notes &> /dev/null; then
-        release_notes=$(claude_generate_notes "$version" 2>/dev/null)
-        if [[ $? -eq 0 ]] && [[ -n "$release_notes" ]]; then
-            log_success "Release notes generadas exitosamente"
-            save_state "release_notes" "$release_notes"
+    local release_notes=""
+    if declare -f claude_generate_notes &> /dev/null; then
+        # Try to generate notes, show errors if they occur
+        if release_notes=$(claude_generate_notes "$version" 2>&1); then
+            if [[ -n "$release_notes" ]]; then
+                log_success "Release notes generadas exitosamente"
+                save_state "release_notes" "$release_notes"
+            else
+                log_warn "Claude devolvió respuesta vacía, usando template por defecto"
+                release_notes=""
+            fi
         else
-            log_warn "No se pudieron generar release notes con Claude, usando template por defecto"
+            log_warn "Error al generar release notes: $release_notes"
+            log_warn "Usando template por defecto para el PR"
             release_notes=""
         fi
     else
         log_warn "Claude integration no disponible, usando template por defecto"
-        release_notes=""
     fi
 
     # Step 3b: Generate Confluence summary
     log_step "3b" "Generando summary para Confluence"
 
-    local confluence_summary
-    if command -v claude_generate_confluence_summary &> /dev/null; then
+    if declare -f claude_generate_confluence_summary &> /dev/null; then
         # Create .releases directory if it doesn't exist
         local notes_dir=$(get_config "release_notes_dir" ".releases")
         mkdir -p "$notes_dir"
 
         local confluence_file="${notes_dir}/confluence-summary-${version}.txt"
-        confluence_summary=$(claude_generate_confluence_summary "$version" 2>/dev/null)
+        local confluence_summary
 
-        if [[ $? -eq 0 ]] && [[ -n "$confluence_summary" ]]; then
-            echo "$confluence_summary" > "$confluence_file"
-            log_success "Confluence summary guardado en: $confluence_file"
-            save_state "confluence_summary_file" "$confluence_file"
-
-            # Also save to state for potential future use
-            save_state "confluence_summary" "$confluence_summary"
+        if confluence_summary=$(claude_generate_confluence_summary "$version" 2>&1); then
+            if [[ -n "$confluence_summary" ]]; then
+                echo "$confluence_summary" > "$confluence_file"
+                log_success "Confluence summary guardado en: $confluence_file"
+                save_state "confluence_summary_file" "$confluence_file"
+                save_state "confluence_summary" "$confluence_summary"
+            else
+                log_warn "Claude devolvió respuesta vacía para Confluence summary"
+            fi
         else
-            log_warn "No se pudo generar Confluence summary"
+            log_warn "Error al generar Confluence summary: $confluence_summary"
         fi
     else
         log_warn "Claude integration no disponible para Confluence summary"
