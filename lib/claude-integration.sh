@@ -204,6 +204,88 @@ Genera solo el contenido markdown, sin comillas ni delimitadores de código. NO 
     fi
 }
 
+# Generate Confluence-formatted release summary
+# Returns: Confluence wiki markup formatted release notes
+claude_generate_confluence_summary() {
+    local version="$1"
+    local output_file="${2:-}"
+
+    log_info "Generando summary de release para Confluence v${version} con Claude AI..."
+
+    # Get commits since last tag
+    local commits
+    commits=$(get_commits_since_last_tag)
+
+    if [[ -z "$commits" ]]; then
+        log_warn "No hay commits desde el último release"
+        return 1
+    fi
+
+    # Build prompt for Confluence format
+    local prompt="Eres un experto en documentación de releases y comunicación técnica.
+
+Genera un summary de release profesional en FORMATO CONFLUENCE WIKI MARKUP para la versión $version basándote en los siguientes commits:
+
+$commits
+
+Instrucciones:
+1. Usa formato de Confluence Wiki Markup (NO markdown)
+2. Comienza con un panel info con resumen ejecutivo
+3. Agrupa los cambios por categorías con headings h2
+4. Usa listas con bullets (-)
+5. Usa emojis para categorías: 🚀 features, 🐛 fixes, 💥 breaking, 📝 docs
+6. Para breaking changes usa un panel warning
+7. Usa formato de código inline con {{monospace}}
+8. El resumen debe ser ejecutivo, claro y conciso (2-3 oraciones)
+
+Formato esperado (CONFLUENCE WIKI MARKUP):
+
+{info:title=Release v${version} - Resumen Ejecutivo}
+[2-3 oraciones resumiendo los cambios más importantes del release]
+{info}
+
+h2. 🚀 Nuevas Funcionalidades
+- Descripción clara de feature 1
+- Descripción clara de feature 2
+
+h2. 🐛 Correcciones de Bugs
+- Descripción del fix 1
+- Descripción del fix 2
+
+h2. 💥 Breaking Changes
+{warning:title=Cambios que Requieren Acción}
+⚠️ *IMPORTANTE*: [Descripción detallada del breaking change y qué acción tomar]
+{warning}
+
+h2. 📝 Otros Cambios
+- Mejoras de rendimiento
+- Actualizaciones de documentación
+- Refactorizaciones internas
+
+h2. ℹ️ Información Adicional
+*Fecha*: $(date +"%Y-%m-%d")
+*Versión*: ${version}
+*Ambiente*: [Staging/Production]
+
+Genera solo el contenido en formato Confluence Wiki Markup, sin explicaciones adicionales."
+
+    # Call Claude with higher token limit for detailed summary
+    local summary
+    summary=$(claude_api_call "$prompt" 2048)
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    # Save to file if specified
+    if [[ -n "$output_file" ]]; then
+        echo "$summary" > "$output_file"
+        log_success "Confluence summary guardado en: $output_file"
+    else
+        echo "$summary"
+    fi
+}
+
 # Validate changes before release
 # Returns: list of warnings/issues or "OK"
 claude_validate_changes() {
@@ -338,5 +420,6 @@ export -f claude_is_configured
 export -f claude_api_call
 export -f claude_suggest_version
 export -f claude_generate_notes
+export -f claude_generate_confluence_summary
 export -f claude_validate_changes
 export -f claude_assist

@@ -424,12 +424,10 @@ cmd_start() {
     fi
 
     # Commit version bump - add all modified version files
-    local commit_msg
-    commit_msg="chore(release): bump version to ${version}
-
-🤖 Generated with [release-ai](https://github.com/your-username/release-ai)"
-
     log_step "2b" "Haciendo commit del bump de versión"
+
+    # Use simple conventional commit format for strict linter compatibility
+    local commit_msg="chore(release): bump version to ${version}"
 
     # Add all version files from config to git
     local file_count
@@ -442,8 +440,10 @@ cmd_start() {
         fi
     done
 
+    # Use only subject line for strict conventional commit compliance
     if ! git commit -m "$commit_msg" 2>&1; then
         log_error "Fallo al hacer commit"
+        log_error "Mensaje de commit: $commit_msg"
         return 1
     fi
 
@@ -468,6 +468,32 @@ cmd_start() {
     else
         log_warn "Claude integration no disponible, usando template por defecto"
         release_notes=""
+    fi
+
+    # Step 3b: Generate Confluence summary
+    log_step "3b" "Generando summary para Confluence"
+
+    local confluence_summary
+    if command -v claude_generate_confluence_summary &> /dev/null; then
+        # Create .releases directory if it doesn't exist
+        local notes_dir=$(get_config "release_notes_dir" ".releases")
+        mkdir -p "$notes_dir"
+
+        local confluence_file="${notes_dir}/confluence-summary-${version}.txt"
+        confluence_summary=$(claude_generate_confluence_summary "$version" 2>/dev/null)
+
+        if [[ $? -eq 0 ]] && [[ -n "$confluence_summary" ]]; then
+            echo "$confluence_summary" > "$confluence_file"
+            log_success "Confluence summary guardado en: $confluence_file"
+            save_state "confluence_summary_file" "$confluence_file"
+
+            # Also save to state for potential future use
+            save_state "confluence_summary" "$confluence_summary"
+        else
+            log_warn "No se pudo generar Confluence summary"
+        fi
+    else
+        log_warn "Claude integration no disponible para Confluence summary"
     fi
 
     # Step 4: Push release branch
