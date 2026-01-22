@@ -31,7 +31,7 @@ A powerful CLI tool that automates the complete software release lifecycle with 
 ### Homebrew (Recommended)
 
 ```bash
-brew tap melannie-cambiaso/release-ai
+brew tap melannie-cambiaso/release-ai https://github.com/melannie-cambiaso/release-ai
 brew install release-ai
 ```
 
