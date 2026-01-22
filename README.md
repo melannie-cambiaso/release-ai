@@ -31,14 +31,14 @@ A powerful CLI tool that automates the complete software release lifecycle with 
 ### Homebrew (Recommended)
 
 ```bash
-brew tap your-username/release-ai
+brew tap melannie-cambiaso/release-ai
 brew install release-ai
 ```
 
 ### Manual Installation
 
 ```bash
-git clone https://github.com/your-username/release-ai.git
+git clone https://github.com/melannie-cambiaso/release-ai.git
 cd release-ai
 ./install.sh
 ```
@@ -469,9 +469,9 @@ MIT License - see [LICENSE](LICENSE) for details
 
 ## Support
 
-- 📖 [Documentation](https://github.com/your-username/release-ai)
-- 🐛 [Report Issues](https://github.com/your-username/release-ai/issues)
-- 💬 [Discussions](https://github.com/your-username/release-ai/discussions)
+- 📖 [Documentation](https://github.com/melannie-cambiaso/release-ai)
+- 🐛 [Report Issues](https://github.com/melannie-cambiaso/release-ai/issues)
+- 💬 [Discussions](https://github.com/melannie-cambiaso/release-ai/discussions)
 
 ---
 
