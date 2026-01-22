@@ -2,7 +2,7 @@ class ReleaseAi < Formula
   desc "Automated release management with Claude AI"
   homepage "https://github.com/melannie-cambiaso/release-ai"
   url "https://github.com/melannie-cambiaso/release-ai/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
+  sha256 "4c83ea68ad12cce5e49246797167ea4f8b95866c1f9a3e35340a5707b2f341f9"
   license "MIT"
   version "1.0.0"
 
