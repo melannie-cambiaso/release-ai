@@ -68,22 +68,22 @@ claude_api_call() {
 # Suggest next version based on commits
 # Returns: version bump type and suggested version
 claude_suggest_version() {
-    log_info "Analizando commits con Claude AI..."
+    log_info "Analizando commits con Claude AI..." >&2
 
     # Get commits since last tag
     local commits
     commits=$(get_commits_since_last_tag)
 
     if [[ -z "$commits" ]]; then
-        log_warn "No hay commits desde el último release"
-        log_info "Esto puede ocurrir si:"
-        log_info "  - No hay tags previos en el repositorio"
-        log_info "  - El último commit de bump no está en la rama configurada (${DEVELOP_BRANCH:-develop})"
-        log_info "  - No hay commits nuevos desde el último release"
+        log_warn "No hay commits desde el último release" >&2
+        log_info "Esto puede ocurrir si:" >&2
+        log_info "  - No hay tags previos en el repositorio" >&2
+        log_info "  - El último commit de bump no está en la rama configurada (${DEVELOP_BRANCH:-develop})" >&2
+        log_info "  - No hay commits nuevos desde el último release" >&2
         return 1
     fi
 
-    log_info "Commits obtenidos: $(echo "$commits" | wc -l) líneas"
+    log_info "Commits obtenidos: $(echo "$commits" | wc -l) líneas" >&2
 
     # Get current version (will try package.json first, then fallback to VERSION file)
     local current_version
@@ -94,17 +94,17 @@ claude_suggest_version() {
 
     # If not found, try VERSION file as fallback
     if [[ -z "$current_version" ]] && [[ -f "VERSION" ]]; then
-        log_info "No se encontró version en $version_file, intentando con VERSION file..."
+        log_info "No se encontró version en $version_file, intentando con VERSION file..." >&2
         current_version=$(get_current_version "VERSION" 2>/dev/null)
     fi
 
     if [[ -z "$current_version" ]]; then
-        log_error "No se pudo obtener la versión actual del archivo de versiones"
-        log_error "Archivos verificados: $version_file, VERSION"
+        log_error "No se pudo obtener la versión actual del archivo de versiones" >&2
+        log_error "Archivos verificados: $version_file, VERSION" >&2
         return 1
     fi
 
-    log_info "Versión actual: $current_version"
+    log_info "Versión actual: $current_version" >&2
 
     # Build prompt
     local prompt="Eres un experto en semantic versioning y conventional commits.
@@ -132,18 +132,18 @@ Instrucciones:
 
 Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones adicionales."
 
-    log_info "Enviando solicitud a Claude API..."
+    log_info "Enviando solicitud a Claude API..." >&2
 
     # Call Claude
     local response
     response=$(claude_api_call "$prompt" 500)
 
     if [[ $? -ne 0 ]]; then
-        log_error "Fallo al llamar a Claude API"
+        log_error "Fallo al llamar a Claude API" >&2
         return 1
     fi
 
-    log_info "Respuesta recibida de Claude API"
+    log_info "Respuesta recibida de Claude API" >&2
 
     # Parse and display response
     echo "$response"
