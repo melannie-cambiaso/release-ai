@@ -813,9 +813,13 @@ cmd_suggest() {
     validate_prerequisites || return 1
 
     local suggestion
-    suggestion=$(claude_suggest_version)
+    if ! suggestion=$(claude_suggest_version); then
+        log_error "Error al obtener sugerencia de versión"
+        return 1
+    fi
 
-    if [[ $? -ne 0 ]]; then
+    if [[ -z "$suggestion" ]]; then
+        log_error "Claude devolvió respuesta vacía"
         return 1
     fi
 
