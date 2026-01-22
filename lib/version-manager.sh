@@ -84,19 +84,35 @@ compare_versions() {
 # Get last release tag from git
 get_last_release_tag() {
     local tag
+    local dev_branch="${DEVELOP_BRANCH:-develop}"
 
     # Try git describe first (works if there's a tag in current branch history)
     tag=$(git describe --tags --abbrev=0 2>/dev/null)
 
-    # If git describe fails, look for version bump commits in current branch
-    # This handles workflows where tags are in main but version bumps are cherry-picked to develop
+    # If git describe fails, look for version bump commits in develop branch first
+    # This handles workflows where tags are in main but version bumps are in develop
     if [[ -z "$tag" ]]; then
-        local version_commit=$(git log --no-merges --grep="^chore(release): bump version to" --format="%s" -1 2>/dev/null)
+        # Try develop branch first (local or remote)
+        local version_commit=""
+        if git rev-parse --verify "$dev_branch" &>/dev/null; then
+            version_commit=$(git log "$dev_branch" --no-merges --grep="^chore(release): bump version to" --format="%s" -1 2>/dev/null)
+        elif git rev-parse --verify "origin/$dev_branch" &>/dev/null; then
+            version_commit=$(git log "origin/$dev_branch" --no-merges --grep="^chore(release): bump version to" --format="%s" -1 2>/dev/null)
+        fi
+
+        # If not found in develop, try current branch
+        if [[ -z "$version_commit" ]]; then
+            version_commit=$(git log --no-merges --grep="^chore(release): bump version to" --format="%s" -1 2>/dev/null)
+        fi
+
         if [[ -n "$version_commit" ]]; then
             # Extract version from commit message: "chore(release): bump version to 1.8.2" -> "v1.8.2"
             local version=$(echo "$version_commit" | sed -n 's/^chore(release): bump version to \([0-9.]*\)$/\1/p')
             if [[ -n "$version" ]]; then
                 tag="v${version}"
+                if [[ -n "${DEBUG:-}" ]]; then
+                    echo "[DEBUG] Found last release from commit message: $tag" >&2
+                fi
             fi
         fi
     fi
@@ -109,9 +125,23 @@ get_last_release_tag() {
                 break
             fi
         done)
+        if [[ -n "$tag" ]] && [[ -n "${DEBUG:-}" ]]; then
+            echo "[DEBUG] Found last release from tag ancestry: $tag" >&2
+        fi
+    fi
+
+    # Last resort: get the most recent tag from all branches
+    if [[ -z "$tag" ]]; then
+        tag=$(git tag --sort=-committerdate | head -1)
+        if [[ -n "$tag" ]] && [[ -n "${DEBUG:-}" ]]; then
+            echo "[DEBUG] Found last release from most recent tag: $tag" >&2
+        fi
     fi
 
     if [[ -z "$tag" ]]; then
+        if [[ -n "${DEBUG:-}" ]]; then
+            echo "[DEBUG] No tags found in repository" >&2
+        fi
         log_warn "No se encontraron tags previos"
         return 1
     fi
