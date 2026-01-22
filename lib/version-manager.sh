@@ -2,21 +2,39 @@
 # version-manager.sh - Version extraction and validation utilities
 # Handles semantic versioning logic for release automation
 
-# Extract current version from package.json
+# Extract current version from various version file formats
+# Supports: package.json, VERSION file, or any JSON with .version field
 get_current_version() {
-    local package_json="${1:-package.json}"
+    local version_file="${1:-package.json}"
 
-    if [[ ! -f "$package_json" ]]; then
-        log_error "package.json no encontrado: $package_json"
-        return 1
+    if [[ ! -f "$version_file" ]]; then
+        # Try fallback to VERSION file if default package.json doesn't exist
+        if [[ "$version_file" == "package.json" ]] && [[ -f "VERSION" ]]; then
+            version_file="VERSION"
+        else
+            log_error "Archivo de versión no encontrado: $version_file"
+            return 1
+        fi
     fi
 
     local version
-    version=$(jq -r '.version' "$package_json" 2>/dev/null)
 
-    if [[ -z "$version" || "$version" == "null" ]]; then
-        log_error "No se pudo leer la versión de $package_json"
-        return 1
+    # Check if it's a JSON file (package.json, manifest.json, etc.)
+    if [[ "$version_file" =~ \.json$ ]]; then
+        version=$(jq -r '.version' "$version_file" 2>/dev/null)
+
+        if [[ -z "$version" || "$version" == "null" ]]; then
+            log_error "No se pudo leer la versión de $version_file"
+            return 1
+        fi
+    else
+        # Plain text version file (VERSION, version.txt, etc.)
+        version=$(cat "$version_file" 2>/dev/null | tr -d '[:space:]')
+
+        if [[ -z "$version" ]]; then
+            log_error "No se pudo leer la versión de $version_file"
+            return 1
+        fi
     fi
 
     echo "$version"
@@ -142,31 +160,56 @@ calculate_next_version() {
 }
 
 # Get commits since last tag
+# Args: end_ref (optional) - commit/ref to use as end point (default: HEAD)
 get_commits_since_last_tag() {
+    local end_ref="${1:-HEAD}"
     local last_tag
     last_tag=$(get_last_release_tag)
 
     if [[ -z "$last_tag" ]]; then
-        # If no tags, get all commits
-        git log --no-merges --pretty=format:'%H|%s|%b'
+        # If no tags, get all commits up to end_ref
+        if [[ "$end_ref" == "HEAD" ]]; then
+            git log --no-merges --pretty=format:'%H|%s|%b'
+        else
+            git log --no-merges --pretty=format:'%H|%s|%b' "${end_ref}"
+        fi
         return
     fi
 
     # Extract version from tag
     local version=$(echo "$last_tag" | sed 's/^v//')
 
-    # Always look for version bump commit first (more accurate for develop branch workflow)
-    local bump_commit=$(git log --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+    # Always look for version bump commit first in develop branch (more accurate for develop branch workflow)
+    local bump_commit=""
+
+    # Use configured develop branch or default to "develop"
+    local dev_branch="${DEVELOP_BRANCH:-develop}"
+
+    # Check if develop branch exists locally or remotely
+    if git rev-parse --verify "$dev_branch" &>/dev/null; then
+        bump_commit=$(git log "$dev_branch" --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+    elif git rev-parse --verify "origin/$dev_branch" &>/dev/null; then
+        bump_commit=$(git log "origin/$dev_branch" --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+    fi
+
+    # If not found in develop, try current branch
+    if [[ -z "$bump_commit" ]]; then
+        bump_commit=$(git log --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+    fi
 
     if [[ -n "$bump_commit" ]]; then
-        # Found version bump commit in current branch, use it
-        git log --no-merges --pretty=format:'%H|%s|%b' "${bump_commit}..HEAD"
+        # Found version bump commit, use it as reference point
+        git log --no-merges --pretty=format:'%H|%s|%b' "${bump_commit}..${end_ref}"
     elif git rev-parse "$last_tag" &>/dev/null; then
         # Fallback: use the tag directly
-        git log --no-merges --pretty=format:'%H|%s|%b' "${last_tag}..HEAD"
+        git log --no-merges --pretty=format:'%H|%s|%b' "${last_tag}..${end_ref}"
     else
-        # Last resort: get all commits
-        git log --no-merges --pretty=format:'%H|%s|%b'
+        # Last resort: get all commits up to end_ref
+        if [[ "$end_ref" == "HEAD" ]]; then
+            git log --no-merges --pretty=format:'%H|%s|%b'
+        else
+            git log --no-merges --pretty=format:'%H|%s|%b' "${end_ref}"
+        fi
     fi
 }
 

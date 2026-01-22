@@ -81,12 +81,12 @@ claude_suggest_version() {
 
     log_info "Commits obtenidos: $(echo "$commits" | wc -l) líneas"
 
-    # Get current version
+    # Get current version (will try package.json first, then fallback to VERSION file)
     local current_version
     current_version=$(get_current_version "$PACKAGE_JSON")
 
     if [[ -z "$current_version" ]]; then
-        log_error "No se pudo obtener la versión actual de package.json"
+        log_error "No se pudo obtener la versión actual del archivo de versiones"
         return 1
     fi
 
@@ -136,16 +136,17 @@ Responde ÚNICAMENTE con el JSON, sin markdown ni explicaciones adicionales."
 }
 
 # Generate release notes for a version
-# Args: version, output_file (optional)
+# Args: version, output_file (optional), end_ref (optional - default: HEAD)
 claude_generate_notes() {
     local version="$1"
     local output_file="${2:-}"
+    local end_ref="${3:-HEAD}"
 
     log_info "Generando release notes para v${version} con Claude AI..."
 
     # Get commits since last tag
     local commits
-    commits=$(get_commits_since_last_tag 2>&1)
+    commits=$(get_commits_since_last_tag "$end_ref" 2>&1)
 
     if [[ -z "$commits" ]]; then
         log_error "No hay commits desde el último release"
@@ -208,16 +209,18 @@ Genera solo el contenido markdown, sin comillas ni delimitadores de código. NO 
 }
 
 # Generate Confluence-formatted release summary
+# Args: version, output_file (optional), end_ref (optional - default: HEAD)
 # Returns: Confluence wiki markup formatted release notes
 claude_generate_confluence_summary() {
     local version="$1"
     local output_file="${2:-}"
+    local end_ref="${3:-HEAD}"
 
     log_info "Generando summary de release para Confluence v${version} con Claude AI..."
 
     # Get commits since last tag
     local commits
-    commits=$(get_commits_since_last_tag 2>&1)
+    commits=$(get_commits_since_last_tag "$end_ref" 2>&1)
 
     if [[ -z "$commits" ]]; then
         log_error "No hay commits desde el último release para Confluence"
@@ -286,6 +289,105 @@ Genera solo el contenido en formato Confluence Wiki Markup, sin explicaciones ad
     if [[ -n "$output_file" ]]; then
         echo "$summary" > "$output_file"
         log_success "Confluence summary guardado en: $output_file"
+    else
+        echo "$summary"
+    fi
+}
+
+# Generate Confluence-formatted release summary in Markdown (Spanish)
+# Args: version, output_file (optional), end_ref (optional - default: HEAD)
+# Returns: Markdown formatted release notes for Confluence in Spanish
+claude_generate_confluence_md() {
+    local version="$1"
+    local output_file="${2:-}"
+    local end_ref="${3:-HEAD}"
+
+    log_info "Generando summary de release en Markdown para Confluence v${version} con Claude AI..."
+
+    # Get commits since last tag
+    local commits
+    commits=$(get_commits_since_last_tag "$end_ref" 2>&1)
+
+    if [[ -z "$commits" ]]; then
+        log_error "No hay commits desde el último release para Confluence Markdown"
+        return 1
+    fi
+
+    log_info "Commits encontrados para Confluence MD: $(echo "$commits" | wc -l) líneas"
+
+    # Build prompt for Confluence Markdown format
+    local prompt="Eres un experto en documentación de releases y comunicación técnica.
+
+Genera un summary de release profesional en FORMATO MARKDOWN EN ESPAÑOL para la versión $version basándote en los siguientes commits:
+
+$commits
+
+Instrucciones:
+1. Usa formato Markdown limpio y profesional
+2. Comienza con un bloque de resumen ejecutivo destacado
+3. Agrupa los cambios por categorías con headings (##)
+4. Usa listas con bullets (-)
+5. Usa emojis para categorías: 🚀 features, 🐛 fixes, 💥 breaking, 📝 docs, ⚡ performance, 🔧 chores
+6. Para breaking changes usa un bloque de advertencia con emoji
+7. Usa formato de código inline con backticks cuando sea necesario
+8. El resumen debe ser ejecutivo, claro y conciso (2-3 oraciones)
+9. TODO en español profesional
+
+Formato esperado (MARKDOWN):
+
+> **📋 Resumen Ejecutivo**
+>
+> [2-3 oraciones resumiendo los cambios más importantes del release]
+
+## 🚀 Nuevas Funcionalidades
+
+- Descripción clara y concisa de feature 1
+- Descripción clara y concisa de feature 2
+
+## 🐛 Correcciones de Bugs
+
+- Descripción del fix 1 con contexto
+- Descripción del fix 2 con contexto
+
+## 💥 Breaking Changes
+
+> **⚠️ IMPORTANTE - Cambios que Requieren Acción**
+>
+> [Descripción detallada del breaking change y qué acción tomar]
+
+## ⚡ Mejoras de Rendimiento
+
+- Optimización 1
+- Optimización 2
+
+## 📝 Otros Cambios
+
+- Mejoras de documentación
+- Refactorizaciones internas
+- Actualizaciones de dependencias
+
+---
+
+**ℹ️ Información del Release**
+
+- **Versión:** ${version}
+- **Fecha:** $(date +"%d/%m/%Y")
+- **Ambiente:** [Staging/Production]
+
+Genera solo el contenido en formato Markdown en español, sin delimitadores de código ni explicaciones adicionales."
+
+    # Call Claude with higher token limit for detailed summary
+    local summary
+    summary=$(claude_api_call "$prompt" 2048)
+
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+
+    # Save to file if specified
+    if [[ -n "$output_file" ]]; then
+        echo "$summary" > "$output_file"
+        log_success "Confluence Markdown summary guardado en: $output_file"
     else
         echo "$summary"
     fi
@@ -426,5 +528,6 @@ export -f claude_api_call
 export -f claude_suggest_version
 export -f claude_generate_notes
 export -f claude_generate_confluence_summary
+export -f claude_generate_confluence_md
 export -f claude_validate_changes
 export -f claude_assist

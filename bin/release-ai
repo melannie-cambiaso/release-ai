@@ -35,6 +35,11 @@ MAIN_BRANCH="$(get_config "main_branch" "main")"
 DEVELOP_BRANCH="$(get_config "develop_branch" "develop")"
 PR_TARGET_BRANCH="$(get_config "pr_target_branch" "main")"
 
+# Export branch variables so they're available to sourced functions
+export DEVELOP_BRANCH
+export PR_TARGET_BRANCH
+export MAIN_BRANCH
+
 # Validate prerequisites
 validate_prerequisites() {
     log_phase "Validando prerequisitos"
@@ -268,6 +273,8 @@ cmd_init() {
     echo ""
     log_info "Próximos pasos:"
     echo "  1. Edita .release-ai.config.json con la configuración de tu proyecto"
+    echo "     - Configura 'develop_branch': rama donde se buscan commits de desarrollo"
+    echo "     - Configura 'pr_target_branch': rama destino para PRs de release (ej: main)"
     echo "  2. Ejecuta 'release-ai config' para ver la configuración actual"
     echo "  3. Ejecuta 'release-ai start <version>' para crear un nuevo release"
     if claude_is_configured 2>/dev/null; then
@@ -281,8 +288,8 @@ cmd_config() {
 
     echo "Branches:"
     echo "  Main: $MAIN_BRANCH"
-    echo "  Develop: $DEVELOP_BRANCH"
-    echo "  PR Target: $PR_TARGET_BRANCH"
+    echo "  Develop: $DEVELOP_BRANCH (rama de desarrollo donde se buscan los commits)"
+    echo "  PR Target: $PR_TARGET_BRANCH (rama destino para PRs de release)"
     echo ""
 
     echo "Archivos de configuración:"
@@ -458,7 +465,8 @@ cmd_start() {
     local release_notes=""
     if declare -f claude_generate_notes &> /dev/null; then
         # Try to generate notes, show errors if they occur
-        if release_notes=$(claude_generate_notes "$version" 2>&1); then
+        # Use HEAD~1 to exclude the bump commit we just created
+        if release_notes=$(claude_generate_notes "$version" "" "HEAD~1" 2>&1); then
             if [[ -n "$release_notes" ]]; then
                 log_success "Release notes generadas exitosamente"
                 save_state "release_notes" "$release_notes"
@@ -486,7 +494,8 @@ cmd_start() {
         local confluence_file="${notes_dir}/confluence-summary-${version}.txt"
         local confluence_summary
 
-        if confluence_summary=$(claude_generate_confluence_summary "$version" 2>&1); then
+        # Use HEAD~1 to exclude the bump commit we just created
+        if confluence_summary=$(claude_generate_confluence_summary "$version" "" "HEAD~1" 2>&1); then
             if [[ -n "$confluence_summary" ]]; then
                 echo "$confluence_summary" > "$confluence_file"
                 log_success "Confluence summary guardado en: $confluence_file"
@@ -500,6 +509,34 @@ cmd_start() {
         fi
     else
         log_warn "Claude integration no disponible para Confluence summary"
+    fi
+
+    # Step 3c: Generate Confluence Markdown summary
+    log_step "3c" "Generando summary en Markdown para Confluence (ES)"
+
+    if declare -f claude_generate_confluence_md &> /dev/null; then
+        # Create .releases directory if it doesn't exist
+        local notes_dir=$(get_config "release_notes_dir" ".releases")
+        mkdir -p "$notes_dir"
+
+        local confluence_md_file="${notes_dir}/confluence-summary-${version}.md"
+        local confluence_md_summary
+
+        # Use HEAD~1 to exclude the bump commit we just created
+        if confluence_md_summary=$(claude_generate_confluence_md "$version" "" "HEAD~1" 2>&1); then
+            if [[ -n "$confluence_md_summary" ]]; then
+                echo "$confluence_md_summary" > "$confluence_md_file"
+                log_success "Confluence Markdown summary guardado en: $confluence_md_file"
+                save_state "confluence_md_summary_file" "$confluence_md_file"
+                save_state "confluence_md_summary" "$confluence_md_summary"
+            else
+                log_warn "Claude devolvió respuesta vacía para Confluence Markdown summary"
+            fi
+        else
+            log_warn "Error al generar Confluence Markdown summary: $confluence_md_summary"
+        fi
+    else
+        log_warn "Claude integration no disponible para Confluence Markdown summary"
     fi
 
     # Step 4: Push release branch
@@ -815,6 +852,39 @@ cmd_notes() {
     fi
 }
 
+# cmd_confluence_md: Generate Confluence Markdown summary with Claude AI
+cmd_confluence_md() {
+    local version="$1"
+
+    if [[ -z "$version" ]]; then
+        log_error "Versión no proporcionada"
+        echo "Uso: release-ai confluence-md <version>"
+        return 1
+    fi
+
+    if ! claude_is_configured; then
+        log_error "Claude AI no está configurado"
+        log_info "Ejecuta 'release-ai init' para configurar tu API key"
+        return 1
+    fi
+
+    validate_prerequisites || return 1
+
+    # Create output directory
+    local notes_dir=$(get_config "release_notes_dir" ".releases")
+    mkdir -p "$notes_dir"
+
+    local output_file="${notes_dir}/confluence-summary-${version}.md"
+
+    claude_generate_confluence_md "$version" "$output_file"
+
+    if [[ $? -eq 0 ]]; then
+        echo ""
+        log_success "Confluence Markdown summary generado exitosamente"
+        log_info "Archivo: $output_file"
+    fi
+}
+
 # cmd_validate: Validate changes with Claude
 cmd_validate() {
     if ! claude_is_configured; then
@@ -865,6 +935,7 @@ Commands:
 
   suggest                  Claude suggests next version based on commits
   notes <version>          Generate release notes with Claude
+  confluence-md <version>  Generate Confluence Markdown summary with Claude
   validate                 Claude validates changes pre-release
   assist                   Interactive Claude assistant for releases
 
@@ -959,6 +1030,10 @@ main() {
         notes)
             shift
             cmd_notes "$@"
+            ;;
+        confluence-md)
+            shift
+            cmd_confluence_md "$@"
             ;;
         validate)
             cmd_validate

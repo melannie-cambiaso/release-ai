@@ -1,7 +1,10 @@
 {
+  "_comment_branches": "Branch configuration - customize based on your git workflow",
   "main_branch": "main",
   "develop_branch": "develop",
+  "_comment_develop_branch": "Branch used for development and where version bump commits are searched",
   "pr_target_branch": "main",
+  "_comment_pr_target_branch": "Target branch for release PRs (usually main/master for production)",
   "version_files": [
     {
       "path": "package.json",
