@@ -35,10 +35,13 @@ MAIN_BRANCH="$(get_config "main_branch" "main")"
 DEVELOP_BRANCH="$(get_config "develop_branch" "develop")"
 PR_TARGET_BRANCH="$(get_config "pr_target_branch" "main")"
 
-# Export branch variables so they're available to sourced functions
+# Export variables so they're available to sourced functions
 export DEVELOP_BRANCH
 export PR_TARGET_BRANCH
 export MAIN_BRANCH
+export PACKAGE_JSON
+export APP_JSON
+export REPO_ROOT
 
 # Validate prerequisites
 validate_prerequisites() {

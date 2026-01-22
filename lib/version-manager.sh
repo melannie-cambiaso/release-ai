@@ -188,13 +188,28 @@ get_commits_since_last_tag() {
     # Check if develop branch exists locally or remotely
     if git rev-parse --verify "$dev_branch" &>/dev/null; then
         bump_commit=$(git log "$dev_branch" --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+        if [[ -n "${DEBUG:-}" ]] && [[ -n "$bump_commit" ]]; then
+            echo "[DEBUG] Found bump commit in local $dev_branch: ${bump_commit:0:7}" >&2
+        fi
     elif git rev-parse --verify "origin/$dev_branch" &>/dev/null; then
         bump_commit=$(git log "origin/$dev_branch" --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+        if [[ -n "${DEBUG:-}" ]] && [[ -n "$bump_commit" ]]; then
+            echo "[DEBUG] Found bump commit in origin/$dev_branch: ${bump_commit:0:7}" >&2
+        fi
     fi
 
     # If not found in develop, try current branch
     if [[ -z "$bump_commit" ]]; then
         bump_commit=$(git log --no-merges --grep="^chore(release): bump version to ${version}" --format="%H" -1 2>/dev/null)
+        if [[ -n "${DEBUG:-}" ]] && [[ -n "$bump_commit" ]]; then
+            echo "[DEBUG] Found bump commit in current branch: ${bump_commit:0:7}" >&2
+        fi
+    fi
+
+    if [[ -n "${DEBUG:-}" ]]; then
+        if [[ -z "$bump_commit" ]]; then
+            echo "[DEBUG] No bump commit found for version $version, will use tag $last_tag" >&2
+        fi
     fi
 
     if [[ -n "$bump_commit" ]]; then

@@ -76,6 +76,10 @@ claude_suggest_version() {
 
     if [[ -z "$commits" ]]; then
         log_warn "No hay commits desde el último release"
+        log_info "Esto puede ocurrir si:"
+        log_info "  - No hay tags previos en el repositorio"
+        log_info "  - El último commit de bump no está en la rama configurada (${DEVELOP_BRANCH:-develop})"
+        log_info "  - No hay commits nuevos desde el último release"
         return 1
     fi
 
@@ -83,10 +87,20 @@ claude_suggest_version() {
 
     # Get current version (will try package.json first, then fallback to VERSION file)
     local current_version
-    current_version=$(get_current_version "$PACKAGE_JSON")
+    local version_file="${PACKAGE_JSON:-package.json}"
+
+    # Try to get version from configured file
+    current_version=$(get_current_version "$version_file" 2>/dev/null)
+
+    # If not found, try VERSION file as fallback
+    if [[ -z "$current_version" ]] && [[ -f "VERSION" ]]; then
+        log_info "No se encontró version en $version_file, intentando con VERSION file..."
+        current_version=$(get_current_version "VERSION" 2>/dev/null)
+    fi
 
     if [[ -z "$current_version" ]]; then
         log_error "No se pudo obtener la versión actual del archivo de versiones"
+        log_error "Archivos verificados: $version_file, VERSION"
         return 1
     fi
 
