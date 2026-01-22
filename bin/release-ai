@@ -469,7 +469,8 @@ cmd_start() {
     if declare -f claude_generate_notes &> /dev/null; then
         # Try to generate notes, show errors if they occur
         # Use HEAD~1 to exclude the bump commit we just created
-        if release_notes=$(claude_generate_notes "$version" "" "HEAD~1" 2>&1); then
+        # Don't capture stderr (2>&1) to avoid mixing log messages with content
+        if release_notes=$(claude_generate_notes "$version" "" "HEAD~1"); then
             if [[ -n "$release_notes" ]]; then
                 log_success "Release notes generadas exitosamente"
                 save_state "release_notes" "$release_notes"
@@ -478,7 +479,7 @@ cmd_start() {
                 release_notes=""
             fi
         else
-            log_warn "Error al generar release notes: $release_notes"
+            log_warn "Error al generar release notes"
             log_warn "Usando template por defecto para el PR"
             release_notes=""
         fi
@@ -498,7 +499,8 @@ cmd_start() {
         local confluence_summary
 
         # Use HEAD~1 to exclude the bump commit we just created
-        if confluence_summary=$(claude_generate_confluence_summary "$version" "" "HEAD~1" 2>&1); then
+        # Don't capture stderr to avoid mixing log messages with content
+        if confluence_summary=$(claude_generate_confluence_summary "$version" "" "HEAD~1"); then
             if [[ -n "$confluence_summary" ]]; then
                 echo "$confluence_summary" > "$confluence_file"
                 log_success "Confluence summary guardado en: $confluence_file"
@@ -526,7 +528,8 @@ cmd_start() {
         local confluence_md_summary
 
         # Use HEAD~1 to exclude the bump commit we just created
-        if confluence_md_summary=$(claude_generate_confluence_md "$version" "" "HEAD~1" 2>&1); then
+        # Don't capture stderr to avoid mixing log messages with content
+        if confluence_md_summary=$(claude_generate_confluence_md "$version" "" "HEAD~1"); then
             if [[ -n "$confluence_md_summary" ]]; then
                 echo "$confluence_md_summary" > "$confluence_md_file"
                 log_success "Confluence Markdown summary guardado en: $confluence_md_file"

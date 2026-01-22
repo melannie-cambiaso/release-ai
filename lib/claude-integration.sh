@@ -156,19 +156,19 @@ claude_generate_notes() {
     local output_file="${2:-}"
     local end_ref="${3:-HEAD}"
 
-    log_info "Generando release notes para v${version} con Claude AI..."
+    log_info "Generando release notes para v${version} con Claude AI..." >&2
 
     # Get commits since last tag
     local commits
-    commits=$(get_commits_since_last_tag "$end_ref" 2>&1)
+    commits=$(get_commits_since_last_tag "$end_ref")
 
     if [[ -z "$commits" ]]; then
-        log_error "No hay commits desde el último release"
-        log_error "Esto puede ocurrir si no hay tags previos o si no hay commits nuevos"
+        log_error "No hay commits desde el último release" >&2
+        log_error "Esto puede ocurrir si no hay tags previos o si no hay commits nuevos" >&2
         return 1
     fi
 
-    log_info "Commits encontrados: $(echo "$commits" | wc -l) líneas"
+    log_info "Commits encontrados: $(echo "$commits" | wc -l) líneas" >&2
 
     # Build prompt
     local prompt="Eres un experto en documentación de releases y comunicación técnica.
@@ -230,18 +230,18 @@ claude_generate_confluence_summary() {
     local output_file="${2:-}"
     local end_ref="${3:-HEAD}"
 
-    log_info "Generando summary de release para Confluence v${version} con Claude AI..."
+    log_info "Generando summary de release para Confluence v${version} con Claude AI..." >&2
 
     # Get commits since last tag
     local commits
-    commits=$(get_commits_since_last_tag "$end_ref" 2>&1)
+    commits=$(get_commits_since_last_tag "$end_ref")
 
     if [[ -z "$commits" ]]; then
-        log_error "No hay commits desde el último release para Confluence"
+        log_error "No hay commits desde el último release para Confluence" >&2
         return 1
     fi
 
-    log_info "Commits encontrados para Confluence: $(echo "$commits" | wc -l) líneas"
+    log_info "Commits encontrados para Confluence: $(echo "$commits" | wc -l) líneas" >&2
 
     # Build prompt for Confluence format
     local prompt="Eres un experto en documentación de releases y comunicación técnica.
@@ -316,18 +316,18 @@ claude_generate_confluence_md() {
     local output_file="${2:-}"
     local end_ref="${3:-HEAD}"
 
-    log_info "Generando summary de release en Markdown para Confluence v${version} con Claude AI..."
+    log_info "Generando summary de release en Markdown para Confluence v${version} con Claude AI..." >&2
 
     # Get commits since last tag
     local commits
-    commits=$(get_commits_since_last_tag "$end_ref" 2>&1)
+    commits=$(get_commits_since_last_tag "$end_ref")
 
     if [[ -z "$commits" ]]; then
-        log_error "No hay commits desde el último release para Confluence Markdown"
+        log_error "No hay commits desde el último release para Confluence Markdown" >&2
         return 1
     fi
 
-    log_info "Commits encontrados para Confluence MD: $(echo "$commits" | wc -l) líneas"
+    log_info "Commits encontrados para Confluence MD: $(echo "$commits" | wc -l) líneas" >&2
 
     # Build prompt for Confluence Markdown format
     local prompt="Eres un experto en documentación de releases y comunicación técnica.
